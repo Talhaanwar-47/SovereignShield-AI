@@ -449,68 +449,79 @@ const COPILOT_SAMPLE_PROMPTS = [
   "Generate today's fleet report",
 ] as const
 
-function resolveCopilotResponse(queryText: string): string[] {
-  const q = queryText.toLowerCase()
+const SOVEREIGNSHIELD_COPILOT_SYSTEM_INSTRUCTION =
+  'You are SovereignShield AI, an advanced Estonian Autonomous Fleet Copilot. Context: Current registry includes Driver: Jürgen Tamm (Isikukood: 39001010006, Class-B). Active operational vehicle units: EE-FLEET-991, EE-FLEET-402, EE-FLEET-118. Keep replies strictly under 3 sentences, technically authoritative, precise, and preserve a hardcore terminal cyberpunk aesthetic layout.'
 
-  if (q.includes('expired') || q.includes('license')) {
-    return [
-      'AI AGENT [gpt-4o]: Intent classified → COMPLIANCE_SCAN · LICENSE_EXPIRY_AUDIT',
-      'AI AGENT: Connecting to Estonia Transport Registry (Transpordiamet) via GovCloud TLS 1.3 tunnel... OK (12ms)',
-      'AI AGENT: Indexed 142 active driver profiles across Harju, Tartu, and Pärnu operational zones.',
-      'AI AGENT: ► FLAG 1 — Kadri Saar · Isikukood 48203150234 · EU Class-C Commercial · EXPIRED 14 days ago · Assigned: EE-FLEET-402',
-      'AI AGENT: ► FLAG 2 — Toomas Leht · Isikukood 37512087765 · EU Class-B Standard · EXPIRED 3 days ago · Assigned: EE-FLEET-089',
-      'AI AGENT: Compliance severity: HIGH. Both drivers blocked from dispatch until Smart-ID re-verification completes.',
-      'AI AGENT: Mobile-ID challenge packets dispatched. Auto-generated compliance ticket #SS-2847. SLA resolution window: 48 hours.',
-    ]
+interface GeminiContentPart {
+  text?: string
+}
+
+interface GeminiGenerateResponse {
+  candidates?: Array<{
+    content?: {
+      parts?: GeminiContentPart[]
+    }
+  }>
+  error?: {
+    message?: string
+  }
+}
+
+function getGeminiEndpoint(): string {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY
+  return `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`
+}
+
+async function fetchGeminiCopilotResponse(userPrompt: string): Promise<string> {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY
+  if (!apiKey) {
+    throw new Error('VITE_GEMINI_API_KEY missing from GovCloud environment vault.')
   }
 
-  if (q.includes('maintenance') || q.includes('vehicles require') || q.includes('vehicle')) {
-    return [
-      'AI AGENT [gpt-4o]: Intent classified → PREDICTIVE_MAINTENANCE · FLEET_HEALTH_DIAGNOSTICS',
-      'AI AGENT: Running thermodynamic and mechanical anomaly sweep across 145 registered fleet assets...',
-      'AI AGENT: ► EE-FLEET-402 (Scania EV) — Brake pad wear at 91% threshold · Battery SOH 41% · CRITICAL · Route: Tallinn→Tartu',
-      'AI AGENT: ► EE-FLEET-205 (Volvo FE Electric) — Battery at 19% · Regenerative system fault code BMS-044 · IMMOBILIZED at Pärnu Hub',
-      'AI AGENT: ► EE-FLEET-991 (Mercedes eActros) — Scheduled service overdue by 6 days · Tire pressure variance detected on axle 2',
-      'AI AGENT: Maintenance windows proposed: Tartu Service Garage (402) · 09 Aug 14:00 EEST · Pärnu Hub (205) · 10 Aug 08:00 EEST',
-      'AI AGENT: Work orders drafted and queued for Fleet Manager approval. Estimated downtime cost: €2,340/day if unresolved.',
-    ]
+  const response = await fetch(getGeminiEndpoint(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: userPrompt }] }],
+      systemInstruction: {
+        parts: [{ text: SOVEREIGNSHIELD_COPILOT_SYSTEM_INSTRUCTION }],
+      },
+    }),
+  })
+
+  const data = (await response.json()) as GeminiGenerateResponse
+
+  if (!response.ok) {
+    throw new Error(data.error?.message ?? `Gemini uplink rejected · HTTP ${response.status}`)
   }
 
-  if (q.includes('high risk') || q.includes('risk')) {
-    return [
-      'AI AGENT [gpt-4o]: Intent classified → RISK_VECTOR_ANALYSIS · BEHAVIORAL_TELEMETRY_SCORING',
-      'AI AGENT: Applying SovereignShield neural risk model v4.1 across 142 driver telemetry streams (72h rolling window)...',
-      'AI AGENT: ► RISK TIER: CRITICAL — Kadri Saar · Score 8.7/10 · 3 speed violations >110 km/h · Harsh braking events: 14 · Asset: EE-FLEET-402',
-      'AI AGENT: ► RISK TIER: ELEVATED — Liis Pärn · Score 6.4/10 · Idle battery drain pattern · 2 corridor deviation alerts · Asset: EE-FLEET-205',
-      'AI AGENT: ► RISK TIER: ELEVATED — Toomas Leht · Score 5.9/10 · Expired license + night-shift fatigue index 78% · Asset: EE-FLEET-089',
-      'AI AGENT: Cross-referencing with Estonia Police & Border Guard Board (PPA) incident database... 0 open citations, 1 pending review.',
-      'AI AGENT: Recommended actions: Mandatory safety briefing for Kadri Saar · GPS speed governor activation · Executive alert dispatched to Fleet Manager.',
-    ]
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+  if (!text) {
+    throw new Error('Gemini response payload empty · candidates[0].content.parts[0].text unresolved.')
   }
 
-  if (q.includes('report') || q.includes('generate') || q.includes("today")) {
-    return [
-      'AI AGENT [gpt-4o]: Intent classified → EXECUTIVE_REPORT_GENERATION · DAILY_FLEET_SUMMARY',
-      'AI AGENT: Aggregating telemetry, compliance, energy, and risk vectors for reporting period: 09 Aug 2026 00:00–23:59 EEST...',
-      'AI AGENT: ── FLEET OVERVIEW ── Active units: 142/145 · Optimal clearance: 68% · Critical warnings: 2 · Avg latency: 11.8ms',
-      'AI AGENT: ── ENERGY MATRIX ── Fleet avg battery: 57.2% · EV consumption: 1,240 kWh · CO₂ offset vs diesel baseline: 3.8 tonnes',
-      'AI AGENT: ── COMPLIANCE ── Expired licenses: 2 · Pending Smart-ID rotations: 5 · Gov registry sync SLA: 100%',
-      'AI AGENT: ── INCIDENTS ── Speed anomalies: 7 · Maintenance flags: 3 · Zero-accident streak: 41 days',
-      'AI AGENT: PDF report compiled (24 pages). SHA-256 checksum: a4f9…c2e1 · Export ready → /reports/fleet-daily-2026-08-09.pdf',
-      'AI AGENT: Report queued for email delivery to stakeholders. Recruiter demo copy saved to secure GovCloud archive.',
-    ]
+  return text
+}
+
+function formatGeminiTerminalLines(text: string): string[] {
+  const segments = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+
+  if (segments.length === 0) {
+    return ['AI AGENT [gemini]: Null inference vector returned from compliance core.']
   }
 
-  return [
-    'AI AGENT [gpt-4o]: Intent unresolved — query mapped to global fleet parameters with low confidence (0.34).',
-    'AI AGENT: Try a sample prompt above, or ask about: expired licenses, maintenance schedules, high-risk drivers, or daily reports.',
-    'AI AGENT: Available data sources: Transpordiamet · Smart-ID/Mobile-ID · Live telemetry · Estonia E-Registry · PPA incident DB.',
-  ]
+  return segments.map((line, index) =>
+    index === 0 ? `AI AGENT [gemini]: ${line}` : `AI AGENT: ${line}`,
+  )
 }
 
 export default function DashboardLayout({ role, onLogout }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard')
   const [copilotQuery, setCopilotQuery] = useState('')
+  const [copilotLoading, setCopilotLoading] = useState(false)
   const [terminalHistory, setTerminalHistory] = useState<string[]>([
     'SYSTEM: SovereignShield AI Core v4.1.0 Initialized.',
     'NETWORK: GovCloud Estonia encrypted tunnel established via Smart-ID.',
@@ -693,18 +704,38 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
     ])
   }
 
-  const executeCopilotQuery = (query: string) => {
+  const executeCopilotQuery = async (query: string) => {
     const trimmed = query.trim()
-    if (!trimmed) return
+    if (!trimmed || copilotLoading) return
 
-    const responses = resolveCopilotResponse(trimmed)
-    setTerminalHistory((prev) => [...prev, `❯ ${trimmed}`, ...responses])
     setCopilotQuery('')
+    setCopilotLoading(true)
+    setTerminalHistory((prev) => [
+      ...prev,
+      `❯ ${trimmed}`,
+      'AI AGENT: Uplink established · Gemini inference core processing...',
+    ])
+
+    try {
+      const geminiText = await fetchGeminiCopilotResponse(trimmed)
+      const responseLines = formatGeminiTerminalLines(geminiText)
+      setTerminalHistory((prev) => [...prev.slice(0, -1), ...responseLines])
+    } catch (err) {
+      const faultMessage =
+        err instanceof Error ? err.message : 'Unknown network partition on Gemini compliance uplink.'
+      setTerminalHistory((prev) => [
+        ...prev.slice(0, -1),
+        `EXCEPTION [GEMINI_UPLINK_FAULT]: ${faultMessage}`,
+        'AI AGENT: Terminal integrity preserved · Verify VITE_GEMINI_API_KEY and retry transmission.',
+      ])
+    } finally {
+      setCopilotLoading(false)
+    }
   }
 
   const runCopilotCommand = (e: FormEvent) => {
     e.preventDefault()
-    executeCopilotQuery(copilotQuery)
+    void executeCopilotQuery(copilotQuery)
   }
 
   const handlePdfReport = () => {
@@ -1293,7 +1324,7 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                     </div>
                     <h2 className="text-xl font-bold tracking-tight text-white">AI Fleet Command Terminal</h2>
                     <p className="mt-1 text-xs text-slate-500">
-                      Natural language interface · GPT-4o agent · GovCloud Estonia
+                      Natural language interface · Google Gemini live agent · GovCloud Estonia
                     </p>
                   </div>
                   <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-mono text-[10px] font-bold text-emerald-400 shadow-sm shadow-emerald-500/10">
@@ -1314,11 +1345,13 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                       className={`mb-2 rounded-lg p-2.5 leading-relaxed transition-all ${
                         item.startsWith('❯')
                           ? 'bg-blue-500/8 font-bold text-blue-400 ring-1 ring-blue-500/10'
-                          : item.startsWith('AI AGENT')
-                            ? 'border border-indigo-500/15 bg-indigo-500/5 text-indigo-200/90'
-                            : item.startsWith('AI')
-                              ? 'border border-indigo-500/10 bg-indigo-500/5 text-indigo-300'
-                              : 'text-slate-500'
+                          : item.startsWith('EXCEPTION')
+                            ? 'border border-red-500/25 bg-red-950/30 text-red-300'
+                            : item.startsWith('AI AGENT')
+                              ? 'border border-emerald-500/25 bg-emerald-500/8 text-emerald-300 shadow-sm shadow-emerald-500/15'
+                              : item.startsWith('AI')
+                                ? 'border border-emerald-500/15 bg-emerald-500/5 text-emerald-400/90'
+                                : 'text-slate-500'
                       }`}
                     >
                       {item}
@@ -1336,7 +1369,8 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                     <button
                       key={prompt}
                       type="button"
-                      onClick={() => executeCopilotQuery(prompt)}
+                      disabled={copilotLoading}
+                      onClick={() => void executeCopilotQuery(prompt)}
                       className="rounded-full border border-indigo-500/25 bg-indigo-500/8 px-3.5 py-1.5 text-[11px] font-medium text-indigo-200 transition-all hover:border-indigo-400/40 hover:bg-indigo-500/15 hover:text-white hover:shadow-sm hover:shadow-indigo-500/10"
                     >
                       {prompt}
@@ -1349,15 +1383,28 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                   <input
                     type="text"
                     value={copilotQuery}
+                    disabled={copilotLoading}
                     onChange={(e) => setCopilotQuery(e.target.value)}
-                    placeholder="Type a command or click a sample prompt above..."
-                    className="flex-1 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-2.5 font-mono text-xs text-slate-200 transition-colors focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/20"
+                    placeholder={
+                      copilotLoading
+                        ? 'Gemini inference core processing...'
+                        : 'Type a command or click a sample prompt above...'
+                    }
+                    className="flex-1 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-2.5 font-mono text-xs text-slate-200 transition-colors focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                   />
                   <button
                     type="submit"
-                    className="rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/20 transition hover:brightness-110"
+                    disabled={copilotLoading}
+                    className="flex items-center gap-2 rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    EXECUTE
+                    {copilotLoading ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        SYNC
+                      </>
+                    ) : (
+                      'EXECUTE'
+                    )}
                   </button>
                 </form>
               </div>
