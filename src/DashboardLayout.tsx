@@ -469,7 +469,7 @@ interface GeminiGenerateResponse {
 
 function getGeminiEndpoint(): string {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-  return `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`
+  return `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
 }
 
 async function fetchGeminiCopilotResponse(userPrompt: string): Promise<string> {
