@@ -195,6 +195,89 @@ function mapVehicleToFleetAsset(row: VehicleRow): FleetAsset {
   }
 }
 
+const FLEET_TELEMETRY_INTERVAL_MS = 3000
+const MAX_FLEET_SPEED_KMH = 129
+const FAST_CHARGE_THRESHOLD = 12
+const FAST_CHARGE_RESTORE_PERCENT = 94
+
+function parseSpeedKmh(speed: string): number {
+  const match = speed.match(/(\d+)/)
+  return match ? Number(match[1]) : 0
+}
+
+function formatSpeedKmh(kmh: number): string {
+  if (kmh <= 0) return '0 km/h (Stationary)'
+  if (kmh > 110) return `${kmh} km/h (High)`
+  return `${kmh} km/h`
+}
+
+function isElectricEv(energy: string): boolean {
+  return /electric\s*ev/i.test(energy)
+}
+
+function formatEnergyPercent(percent: number, template: string): string {
+  if (isElectricEv(template)) return `${percent}% Electric EV`
+  if (/diesel/i.test(template)) return `${percent}% Diesel Engine`
+  return `${percent}% Electric EV`
+}
+
+function deriveLiveFleetStatus(
+  speedKmh: number,
+  batteryPercent: number,
+  isEv: boolean,
+  fastChargeReset: boolean,
+): Pick<FleetAsset, 'status' | 'statusLabel'> {
+  if (fastChargeReset) {
+    return { status: 'docking', statusLabel: 'FAST-CHARGE RESET' }
+  }
+  if (speedKmh > 110 || (isEv && batteryPercent <= 25 && speedKmh > 0)) {
+    return { status: 'critical', statusLabel: 'CRITICAL WARNING' }
+  }
+  if (speedKmh === 0 && isEv && batteryPercent >= 88) {
+    return { status: 'docking', statusLabel: 'DOCK CHARGING' }
+  }
+  return { status: 'optimal', statusLabel: 'OPTIMAL CLEARANCE' }
+}
+
+function simulateFleetTelemetry(assets: FleetAsset[], tick: number): FleetAsset[] {
+  return assets.map((asset) => {
+    const currentSpeed = parseSpeedKmh(asset.speed)
+    const delta = Math.floor(Math.random() * 13) - 6
+    let nextSpeed = Math.min(MAX_FLEET_SPEED_KMH, Math.max(0, currentSpeed + delta))
+
+    if (currentSpeed === 0 && Math.random() < 0.35) {
+      nextSpeed = Math.floor(Math.random() * 26) + 4
+    }
+
+    const ev = isElectricEv(asset.energy)
+    let batteryPercent = asset.batteryPercent
+    let energy = asset.energy
+    let fastChargeReset = false
+
+    if (ev && tick % 3 === 0) {
+      batteryPercent = Math.max(0, batteryPercent - 1)
+      energy = formatEnergyPercent(batteryPercent, asset.energy)
+    }
+
+    if (ev && batteryPercent < FAST_CHARGE_THRESHOLD) {
+      batteryPercent = FAST_CHARGE_RESTORE_PERCENT
+      energy = `${FAST_CHARGE_RESTORE_PERCENT}% Electric EV`
+      fastChargeReset = true
+      nextSpeed = 0
+    }
+
+    const liveStatus = deriveLiveFleetStatus(nextSpeed, batteryPercent, ev, fastChargeReset)
+
+    return {
+      ...asset,
+      speed: formatSpeedKmh(nextSpeed),
+      energy,
+      batteryPercent,
+      ...liveStatus,
+    }
+  })
+}
+
 function DataLoadingPanel({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-3xl border border-white/8 bg-slate-950/50 px-8 py-16 backdrop-blur-xl">
@@ -444,6 +527,7 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
   const [fleetAssets, setFleetAssets] = useState<FleetAsset[]>([])
   const [driversLoading, setDriversLoading] = useState(true)
   const [vehiclesLoading, setVehiclesLoading] = useState(true)
+  const fleetTickRef = useRef(0)
 
   const optimalCount = fleetAssets.filter((asset) => asset.status === 'optimal').length
   const criticalCount = fleetAssets.filter((asset) => asset.status === 'critical').length
@@ -527,6 +611,22 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (vehiclesLoading) return
+
+    fleetTickRef.current = 0
+    const intervalId = window.setInterval(() => {
+      fleetTickRef.current += 1
+      const tick = fleetTickRef.current
+      setFleetAssets((prev) => {
+        if (prev.length === 0) return prev
+        return simulateFleetTelemetry(prev, tick)
+      })
+    }, FLEET_TELEMETRY_INTERVAL_MS)
+
+    return () => window.clearInterval(intervalId)
+  }, [vehiclesLoading])
 
   const triggerFileUpload = () => {
     if (ocrPhase === 'scanning') return
@@ -1064,11 +1164,11 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                       <p className="text-xl font-bold text-white">{fleetAssets.length}</p>
                     </div>
                     <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-center">
-                      <p className="text-[10px] uppercase tracking-wider text-slate-500">Optimal</p>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-500">Optimal Clearance</p>
                       <p className="text-xl font-bold text-emerald-400">{optimalCount}</p>
                     </div>
                     <div className="rounded-2xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-center">
-                      <p className="text-[10px] uppercase tracking-wider text-slate-500">Critical</p>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-500">Critical Warnings</p>
                       <p className="text-xl font-bold text-red-400">{criticalCount}</p>
                     </div>
                   </div>
