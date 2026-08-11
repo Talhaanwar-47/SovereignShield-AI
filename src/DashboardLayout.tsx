@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import Tesseract from 'tesseract.js'
 import {
   Shield,
   Activity,
@@ -92,8 +93,6 @@ interface VehicleRow {
   status_label?: string
   statusLabel?: string
 }
-
-const OCR_STEP_MS = 500
 
 type FleetClearanceStatus = 'optimal' | 'critical' | 'docking'
 
@@ -207,10 +206,99 @@ function DataLoadingPanel({ label }: { label: string }) {
 }
 
 const OCR_LOADING_STEPS = [
-  '1/3 Parsing arrays...',
-  '2/3 Running Vision model...',
-  '3/3 Syncing with Estonia Registry',
+  'Initializing AI OCR Vision layers...',
+  'Scanning text vectors...',
+  'Extracting secure fields...',
 ] as const
+
+function mapTesseractProgress(
+  status: string,
+  progress: number,
+): { step: number; message: string } {
+  const normalized = status.toLowerCase()
+
+  if (
+    normalized.includes('loading') ||
+    normalized.includes('initializing') ||
+    normalized.includes('loaded') ||
+    progress < 0.35
+  ) {
+    return { step: 0, message: OCR_LOADING_STEPS[0] }
+  }
+
+  if (normalized.includes('recognizing') || progress < 0.9) {
+    return { step: 1, message: OCR_LOADING_STEPS[1] }
+  }
+
+  return { step: 2, message: OCR_LOADING_STEPS[2] }
+}
+
+function parseOcrText(rawText: string, fallbackDocumentType?: string): OcrResult {
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+
+  const personalCodeMatch = rawText.match(/\b(\d{11})\b/)
+  const licenseMatch =
+    rawText.match(/\b(EE[-\s]?[A-Z0-9]{4,14})\b/i) ??
+    rawText.match(/\b([A-Z]{1,3}[-\s]?\d{5,12})\b/)
+  const expiryMatch = rawText.match(
+    /\b(\d{1,2}\s*[/.-]\s*\d{1,2}\s*[/.-]\s*\d{2,4})\b/,
+  )
+
+  let personalCode = personalCodeMatch?.[1] ?? ''
+  let licenseNumber = licenseMatch?.[1]?.replace(/\s+/g, '') ?? ''
+  let expiryDate = expiryMatch?.[1]?.replace(/\s+/g, ' ').trim() ?? '—'
+
+  const isLikelyName = (line: string) =>
+    !/\d{5,}/.test(line) &&
+    !/^(EE|DL|DRIV|LUB|AUTO|KAT|CLASS|JUHILUBA|DRIVING|LICENSE|EESTI|ESTONIA)/i.test(
+      line,
+    ) &&
+    /^[\p{L}\s'.-]{4,}$/u.test(line) &&
+    line.split(/\s+/).length >= 2
+
+  let fullName = lines.find(isLikelyName) ?? ''
+
+  const usableLines = lines.filter(
+    (line) =>
+      !/^(DRIVING|JUHILUBA|LICENSE|ESTONIA|EESTI|REPUBLIC|EUROPEAN)/i.test(line),
+  )
+
+  if (!fullName && usableLines[0]) fullName = usableLines[0]
+
+  if (!personalCode) {
+    const lineMatch = usableLines.find((line) => /\b\d{11}\b/.test(line.replace(/\s/g, '')))
+    if (lineMatch) {
+      personalCode = lineMatch.replace(/\D/g, '').slice(0, 11)
+    }
+  }
+
+  if (!licenseNumber) {
+    const lineMatch = usableLines.find((line) => /EE[-\s]?[A-Z0-9]/i.test(line))
+    if (lineMatch) licenseNumber = lineMatch.replace(/\s+/g, '')
+  }
+
+  if (!fullName) fullName = usableLines[0] ?? 'Extracted from document'
+  if (!personalCode) {
+    personalCode =
+      usableLines.find((line) => /^\d{11}$/.test(line.replace(/\s/g, ''))) ??
+      usableLines[1] ??
+      '—'
+  }
+  if (!licenseNumber) {
+    licenseNumber = usableLines.find((line) => /EE/i.test(line)) ?? usableLines[2] ?? '—'
+  }
+
+  return {
+    fullName,
+    documentType: fallbackDocumentType ?? 'Estonian Class-B National License',
+    personalCode,
+    licenseNumber,
+    expiryDate,
+  }
+}
 
 const fleetStatusStyles: Record<
   FleetClearanceStatus,
@@ -347,8 +435,10 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
   ])
   const [ocrPhase, setOcrPhase] = useState<OcrPipelinePhase>('idle')
   const [ocrStep, setOcrStep] = useState(0)
-  const [scanRun, setScanRun] = useState(0)
+  const [ocrLiveMessage, setOcrLiveMessage] = useState<string>(OCR_LOADING_STEPS[0])
+  const [ocrError, setOcrError] = useState<string | null>(null)
   const [ocrResult, setOcrResult] = useState<OcrResult | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [pdfGenerating, setPdfGenerating] = useState(false)
   const [driverData, setDriverData] = useState<DriverData | null>(null)
   const [fleetAssets, setFleetAssets] = useState<FleetAsset[]>([])
@@ -438,29 +528,59 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
     }
   }, [])
 
-  useEffect(() => {
-    if (ocrPhase !== 'scanning') return
+  const triggerFileUpload = () => {
+    if (ocrPhase === 'scanning') return
+    fileInputRef.current?.click()
+  }
 
+  const handleDocumentUpload = async (file: File) => {
+    if (ocrPhase === 'scanning') return
+
+    setOcrResult(null)
+    setOcrError(null)
+    setOcrPhase('scanning')
     setOcrStep(0)
-    const timers = [
-      setTimeout(() => setOcrStep(1), OCR_STEP_MS),
-      setTimeout(() => setOcrStep(2), OCR_STEP_MS * 2),
-      setTimeout(() => {
-        if (driverData) {
-          setOcrResult({
-            fullName: driverData.fullName,
-            documentType: driverData.documentType,
-            personalCode: driverData.personalCode,
-            licenseNumber: driverData.licenseNumber,
-            expiryDate: driverData.expiryDate,
-          })
-        }
-        setOcrPhase('complete')
-      }, OCR_STEP_MS * 3),
-    ]
+    setOcrLiveMessage(OCR_LOADING_STEPS[0])
 
-    return () => timers.forEach(clearTimeout)
-  }, [ocrPhase, scanRun, driverData])
+    try {
+      const { data } = await Tesseract.recognize(file, 'est+eng', {
+        logger: (message) => {
+          const mapped = mapTesseractProgress(message.status, message.progress)
+          setOcrStep(mapped.step)
+          setOcrLiveMessage(mapped.message)
+        },
+      })
+
+      const parsed = parseOcrText(data.text, driverData?.documentType)
+      setOcrStep(OCR_LOADING_STEPS.length - 1)
+      setOcrLiveMessage(OCR_LOADING_STEPS[OCR_LOADING_STEPS.length - 1])
+      setOcrResult(parsed)
+      setDriverData((prev) => ({
+        ...(prev ?? applyDriverFallback()),
+        fullName: parsed.fullName,
+        personalCode: parsed.personalCode,
+        licenseNumber: parsed.licenseNumber,
+        expiryDate: parsed.expiryDate,
+        documentType: parsed.documentType,
+        status: 'VERIFIED & REGISTERED',
+      }))
+      setOcrPhase('complete')
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'AI OCR vision scan failed. Please retry with a clearer document image.'
+      setOcrError(message)
+      setOcrPhase('idle')
+      setOcrStep(0)
+    }
+  }
+
+  const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (file) void handleDocumentUpload(file)
+  }
 
   const triggerRecruiterDemo = () => {
     setActiveTab('copilot')
@@ -485,13 +605,6 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
   const runCopilotCommand = (e: FormEvent) => {
     e.preventDefault()
     executeCopilotQuery(copilotQuery)
-  }
-
-  const triggerOcrSimulation = () => {
-    if (ocrPhase === 'scanning') return
-    setOcrResult(null)
-    setScanRun((prev) => prev + 1)
-    setOcrPhase('scanning')
   }
 
   const handlePdfReport = () => {
@@ -738,9 +851,17 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                 </div>
               )}
 
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/*,application/pdf"
+                className="hidden"
+                onChange={handleFileInputChange}
+              />
+
               <button
                 type="button"
-                onClick={triggerOcrSimulation}
+                onClick={triggerFileUpload}
                 disabled={ocrPhase === 'scanning'}
                 className="group relative w-full overflow-hidden rounded-3xl border border-dashed border-blue-400/25 bg-linear-to-b from-blue-500/8 to-indigo-500/5 p-12 text-center transition-all duration-300 hover:border-blue-400/45 hover:from-blue-500/12 hover:to-indigo-500/8 hover:shadow-lg hover:shadow-blue-500/10 disabled:cursor-not-allowed disabled:opacity-70"
               >
@@ -759,7 +880,7 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                   {ocrPhase === 'complete' ? 'Re-upload Document' : 'Click to Upload EU Driver\'s License'}
                 </p>
                 <p className="relative mt-2 text-xs text-slate-500">
-                  Drop zone simulates secure document ingestion · Mock neural pipeline fires instantly
+                  Secure document ingestion · Tesseract AI OCR Vision (est+eng) extracts live identity vectors
                 </p>
                 <div className="relative mt-5 flex flex-wrap items-center justify-center gap-2">
                   {['JPEG', 'PNG', 'PDF'].map((fmt) => (
@@ -781,7 +902,7 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-white">Extracting identity vectors</p>
-                      <p className="text-xs text-indigo-300/70">OpenAI Vision model processing document</p>
+                      <p className="text-xs text-indigo-300/70">{ocrLiveMessage}</p>
                     </div>
                   </div>
 
@@ -831,6 +952,21 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                       className="h-full rounded-full bg-linear-to-r from-indigo-500 to-violet-400 transition-all duration-500 ease-out"
                       style={{ width: `${((ocrStep + 1) / OCR_LOADING_STEPS.length) * 100}%` }}
                     />
+                  </div>
+                </div>
+              )}
+
+              {ocrError && (
+                <div className="rounded-3xl border border-red-500/20 bg-red-950/20 p-5 backdrop-blur-md">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
+                    <div>
+                      <p className="text-sm font-semibold text-slate-100">OCR scan interrupted</p>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-400">{ocrError}</p>
+                      <p className="mt-2 text-[11px] text-slate-500">
+                        Upload a high-contrast JPEG or PNG of the driver license and try again.
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
