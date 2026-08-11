@@ -37,6 +37,7 @@ import {
   Bar,
   Legend,
 } from 'recharts'
+import { supabase } from './supabaseClient'
 
 interface DashboardProps {
   role: string
@@ -55,19 +56,86 @@ type OcrPipelinePhase = 'idle' | 'scanning' | 'complete'
 
 type TabId = 'dashboard' | 'identity' | 'fleet' | 'copilot' | 'auditor' | 'analytics'
 
+interface DriverRow {
+  id?: string | number
+  full_name?: string
+  fullName?: string
+  name?: string
+  document_type?: string
+  documentType?: string
+  personal_code?: string
+  personalCode?: string
+  isikukood?: string
+  license_number?: string
+  licenseNumber?: string
+  expiry_date?: string
+  expiryDate?: string
+  match_score?: string
+  matchScore?: string
+}
+
+interface VehicleRow {
+  id?: string | number
+  asset_id?: string
+  assetId?: string
+  driver_name?: string
+  driverName?: string
+  speed?: number | string
+  battery_percent?: number
+  batteryPercent?: number
+  energy?: string
+  status?: string
+  status_label?: string
+  statusLabel?: string
+}
+
+function mapDriverToOcr(row: DriverRow): OcrResult {
+  return {
+    fullName: row.full_name ?? row.fullName ?? row.name ?? 'Unknown Driver',
+    documentType: row.document_type ?? row.documentType ?? 'Estonian Class-B National License',
+    personalCode: String(row.personal_code ?? row.personalCode ?? row.isikukood ?? '—'),
+    licenseNumber: row.license_number ?? row.licenseNumber ?? '—',
+    expiryDate: row.expiry_date ?? row.expiryDate ?? '—',
+  }
+}
+
+function mapVehicleToFleetAsset(row: VehicleRow): FleetAsset {
+  const batteryPercent = Number(row.battery_percent ?? row.batteryPercent ?? 0)
+  const status: FleetClearanceStatus =
+    row.status?.toLowerCase() === 'critical' ? 'critical' : 'optimal'
+
+  return {
+    assetId: row.asset_id ?? row.assetId ?? `EE-FLEET-${row.id ?? '000'}`,
+    driverName: row.driver_name ?? row.driverName ?? 'Unassigned',
+    speed:
+      typeof row.speed === 'number'
+        ? `${row.speed} km/h`
+        : String(row.speed ?? '0 km/h'),
+    energy: row.energy ?? `${batteryPercent}% Electric EV`,
+    batteryPercent,
+    status,
+    statusLabel:
+      row.status_label ??
+      row.statusLabel ??
+      (status === 'critical' ? 'CRITICAL WARNING' : 'OPTIMAL CLEARANCE'),
+  }
+}
+
+function DataLoadingPanel({ label }: { label: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-3xl border border-white/8 bg-slate-950/50 px-8 py-16 backdrop-blur-xl">
+      <Loader2 className="mb-4 h-8 w-8 animate-spin text-indigo-400" />
+      <p className="text-sm font-semibold text-white">{label}</p>
+      <p className="mt-1 text-xs text-slate-500">Syncing live records from Supabase GovCloud…</p>
+    </div>
+  )
+}
+
 const OCR_LOADING_STEPS = [
   '1/3 Parsing arrays...',
   '2/3 Running Vision model...',
   '3/3 Syncing with Estonia Registry',
 ] as const
-
-const MOCK_OCR_RESULT: OcrResult = {
-  fullName: 'Jürgen Tamm',
-  documentType: 'Estonian Class-B National License',
-  personalCode: '39001010006',
-  licenseNumber: 'EE-B0984122',
-  expiryDate: '12/11/2026',
-}
 
 const OCR_STEP_MS = 500
 
@@ -82,54 +150,6 @@ interface FleetAsset {
   status: FleetClearanceStatus
   statusLabel: string
 }
-
-const FLEET_ASSETS: FleetAsset[] = [
-  {
-    assetId: 'EE-FLEET-991',
-    driverName: 'Jürgen Tamm',
-    speed: '68 km/h',
-    energy: '72% Electric EV',
-    batteryPercent: 72,
-    status: 'optimal',
-    statusLabel: 'OPTIMAL CLEARANCE',
-  },
-  {
-    assetId: 'EE-FLEET-402',
-    driverName: 'Kadri Saar',
-    speed: '94 km/h',
-    energy: '41% Electric EV',
-    batteryPercent: 41,
-    status: 'critical',
-    statusLabel: 'CRITICAL WARNING',
-  },
-  {
-    assetId: 'EE-FLEET-118',
-    driverName: 'Mart Kask',
-    speed: '52 km/h',
-    energy: '88% Electric EV',
-    batteryPercent: 88,
-    status: 'optimal',
-    statusLabel: 'OPTIMAL CLEARANCE',
-  },
-  {
-    assetId: 'EE-FLEET-205',
-    driverName: 'Liis Pärn',
-    speed: '0 km/h',
-    energy: '19% Electric EV',
-    batteryPercent: 19,
-    status: 'critical',
-    statusLabel: 'CRITICAL WARNING',
-  },
-  {
-    assetId: 'EE-FLEET-637',
-    driverName: 'Andres Võsu',
-    speed: '61 km/h',
-    energy: '65% Electric EV',
-    batteryPercent: 65,
-    status: 'optimal',
-    statusLabel: 'OPTIMAL CLEARANCE',
-  },
-]
 
 const fleetStatusStyles: Record<
   FleetClearanceStatus,
@@ -265,6 +285,51 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
   const [scanRun, setScanRun] = useState(0)
   const [ocrResult, setOcrResult] = useState<OcrResult | null>(null)
   const [pdfGenerating, setPdfGenerating] = useState(false)
+  const [drivers, setDrivers] = useState<DriverRow[]>([])
+  const [fleetAssets, setFleetAssets] = useState<FleetAsset[]>([])
+  const [driversLoading, setDriversLoading] = useState(true)
+  const [vehiclesLoading, setVehiclesLoading] = useState(true)
+  const [driversError, setDriversError] = useState<string | null>(null)
+  const [vehiclesError, setVehiclesError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function fetchCloudData() {
+      setDriversLoading(true)
+      setVehiclesLoading(true)
+
+      const [driversRes, vehiclesRes] = await Promise.all([
+        supabase.from('drivers').select('*'),
+        supabase.from('vehicles').select('*'),
+      ])
+
+      if (cancelled) return
+
+      if (driversRes.error) {
+        setDriversError(driversRes.error.message)
+        setDrivers([])
+      } else {
+        setDriversError(null)
+        setDrivers((driversRes.data as DriverRow[]) ?? [])
+      }
+      setDriversLoading(false)
+
+      if (vehiclesRes.error) {
+        setVehiclesError(vehiclesRes.error.message)
+        setFleetAssets([])
+      } else {
+        setVehiclesError(null)
+        setFleetAssets(((vehiclesRes.data as VehicleRow[]) ?? []).map(mapVehicleToFleetAsset))
+      }
+      setVehiclesLoading(false)
+    }
+
+    fetchCloudData()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (ocrPhase !== 'scanning') return
@@ -274,13 +339,13 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
       setTimeout(() => setOcrStep(1), OCR_STEP_MS),
       setTimeout(() => setOcrStep(2), OCR_STEP_MS * 2),
       setTimeout(() => {
-        setOcrResult(MOCK_OCR_RESULT)
+        setOcrResult(drivers[0] ? mapDriverToOcr(drivers[0]) : null)
         setOcrPhase('complete')
       }, OCR_STEP_MS * 3),
     ]
 
     return () => timers.forEach(clearTimeout)
-  }, [ocrPhase, scanRun])
+  }, [ocrPhase, scanRun, drivers])
 
   const triggerRecruiterDemo = () => {
     setActiveTab('copilot')
@@ -505,6 +570,10 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
 
           {activeTab === 'identity' && (
             <div className="relative mx-auto max-w-4xl space-y-8">
+              {driversLoading ? (
+                <DataLoadingPanel label="Loading identity registry" />
+              ) : (
+                <>
               <div className="overflow-hidden rounded-3xl border border-white/8 bg-linear-to-br from-indigo-950/40 via-slate-950/60 to-blue-950/30 p-8 shadow-2xl shadow-indigo-950/30 backdrop-blur-xl">
                 <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
                   <div>
@@ -531,6 +600,42 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                   </div>
                 </div>
               </div>
+
+              {driversError && (
+                <div className="rounded-2xl border border-red-500/25 bg-red-500/5 px-4 py-3 text-xs text-red-300">
+                  Supabase drivers sync failed: {driversError}
+                </div>
+              )}
+
+              {!driversError && drivers.length > 0 && ocrPhase !== 'complete' && (
+                <div className="rounded-3xl border border-white/8 bg-slate-950/50 p-5 backdrop-blur-xl">
+                  <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                    Live Driver Registry · {drivers.length} records
+                  </p>
+                  <div className="space-y-2">
+                    {drivers.slice(0, 5).map((driver, index) => {
+                      const profile = mapDriverToOcr(driver)
+                      return (
+                        <div
+                          key={driver.id ?? index}
+                          className="flex items-center justify-between rounded-xl border border-white/5 bg-white/3 px-4 py-3"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/15 text-xs font-bold text-indigo-300">
+                              {profile.fullName.charAt(0)}
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium text-white">{profile.fullName}</p>
+                              <p className="font-mono text-[10px] text-slate-500">{profile.personalCode}</p>
+                            </div>
+                          </div>
+                          <span className="font-mono text-[10px] text-slate-400">{profile.licenseNumber}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
               <button
                 type="button"
@@ -689,11 +794,23 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                   </div>
                 </div>
               )}
+
+              {ocrPhase === 'complete' && !ocrResult && (
+                <div className="rounded-2xl border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-xs text-amber-300">
+                  OCR pipeline complete, but no driver records were found in Supabase to populate the verified profile.
+                </div>
+              )}
+                </>
+              )}
             </div>
           )}
 
           {activeTab === 'fleet' && (
             <div className="relative mx-auto max-w-6xl space-y-8">
+              {vehiclesLoading ? (
+                <DataLoadingPanel label="Loading fleet telemetry" />
+              ) : (
+                <>
               <div className="overflow-hidden rounded-3xl border border-white/8 bg-linear-to-br from-slate-950/60 via-slate-950/80 to-blue-950/30 p-8 shadow-2xl shadow-slate-950/40 backdrop-blur-xl">
                 <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
                   <div>
@@ -712,23 +829,29 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                   <div className="flex items-center gap-4">
                     <div className="rounded-2xl border border-white/8 bg-black/30 px-4 py-3 text-center">
                       <p className="text-[10px] uppercase tracking-wider text-slate-500">Active Units</p>
-                      <p className="text-xl font-bold text-white">{FLEET_ASSETS.length}</p>
+                      <p className="text-xl font-bold text-white">{fleetAssets.length}</p>
                     </div>
                     <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-center">
                       <p className="text-[10px] uppercase tracking-wider text-slate-500">Optimal</p>
                       <p className="text-xl font-bold text-emerald-400">
-                        {FLEET_ASSETS.filter((a) => a.status === 'optimal').length}
+                        {fleetAssets.filter((a) => a.status === 'optimal').length}
                       </p>
                     </div>
                     <div className="rounded-2xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-center">
                       <p className="text-[10px] uppercase tracking-wider text-slate-500">Critical</p>
                       <p className="text-xl font-bold text-red-400">
-                        {FLEET_ASSETS.filter((a) => a.status === 'critical').length}
+                        {fleetAssets.filter((a) => a.status === 'critical').length}
                       </p>
                     </div>
                   </div>
                 </div>
               </div>
+
+              {vehiclesError && (
+                <div className="rounded-2xl border border-red-500/25 bg-red-500/5 px-4 py-3 text-xs text-red-300">
+                  Supabase vehicles sync failed: {vehiclesError}
+                </div>
+              )}
 
               <div className="overflow-hidden rounded-3xl border border-white/8 bg-slate-950/50 shadow-2xl shadow-black/30 backdrop-blur-xl">
                 <div className="overflow-x-auto">
@@ -755,11 +878,18 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {FLEET_ASSETS.map((asset, index) => (
+                      {fleetAssets.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-5 py-12 text-center text-sm text-slate-500">
+                            No vehicle records returned from Supabase.
+                          </td>
+                        </tr>
+                      ) : (
+                      fleetAssets.map((asset, index) => (
                         <tr
                           key={asset.assetId}
                           className={`border-b border-white/5 transition-colors hover:bg-white/3 ${
-                            index === FLEET_ASSETS.length - 1 ? 'border-b-0' : ''
+                            index === fleetAssets.length - 1 ? 'border-b-0' : ''
                           }`}
                         >
                           <td className="px-5 py-4">
@@ -806,7 +936,8 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                             </span>
                           </td>
                         </tr>
-                      ))}
+                      ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -824,6 +955,8 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
                   </div>
                 </div>
               </div>
+                </>
+              )}
             </div>
           )}
 
