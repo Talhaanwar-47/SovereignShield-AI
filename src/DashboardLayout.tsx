@@ -332,7 +332,7 @@ function parseOcrText(rawText: string, fallbackDocumentType?: string): OcrResult
 
   let personalCode = personalCodeMatch?.[1] ?? ''
   let licenseNumber = licenseMatch?.[1]?.replace(/\s+/g, '') ?? ''
-  let expiryDate = expiryMatch?.[1]?.replace(/\s+/g, ' ').trim() ?? '—'
+  const expiryDate = expiryMatch?.[1]?.replace(/\s+/g, ' ').trim() ?? '—'
 
   const isLikelyName = (line: string) =>
     !/\d{5,}/.test(line) &&
@@ -560,7 +560,7 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
         } else {
           setDriverData(applyDriverFallback())
         }
-      } catch (_err) {
+      } catch {
         if (!cancelled) {
           setDriverData({
             fullName: 'Jürgen Tamm',
@@ -585,7 +585,7 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
         } else {
           setFleetAssets(applyFleetFallback())
         }
-      } catch (_err) {
+      } catch {
         if (!cancelled) {
           const fallbackAssets: VehicleRow[] = [
             {
