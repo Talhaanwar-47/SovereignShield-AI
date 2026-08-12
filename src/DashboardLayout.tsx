@@ -39,161 +39,17 @@ import {
   Legend,
 } from 'recharts'
 import { supabase } from './supabaseClient'
+import { applyDriverFallback, applyFleetFallback } from './data/fallbacks'
+import { mapDriverRowToData, mapVehicleToFleetAsset } from './data/mappers'
+import type { DriverData, DriverRow, OcrPipelinePhase, OcrResult } from './types/driver'
+import type { FleetAsset, FleetClearanceStatus, VehicleRow } from './types/fleet'
 
 interface DashboardProps {
   role: string
   onLogout: () => void
 }
 
-interface OcrResult {
-  fullName: string
-  documentType: string
-  personalCode: string
-  licenseNumber: string
-  expiryDate: string
-}
-
-interface DriverData extends OcrResult {
-  status: string
-}
-
-type OcrPipelinePhase = 'idle' | 'scanning' | 'complete'
-
 type TabId = 'dashboard' | 'identity' | 'fleet' | 'copilot' | 'auditor' | 'analytics'
-
-interface DriverRow {
-  id?: string | number
-  full_name?: string
-  fullName?: string
-  name?: string
-  document_type?: string
-  documentType?: string
-  personal_code?: string
-  personalCode?: string
-  isikukood?: string
-  license_number?: string
-  licenseNumber?: string
-  expiry_date?: string
-  expiryDate?: string
-  match_score?: string
-  matchScore?: string
-}
-
-interface VehicleRow {
-  id?: string | number
-  asset_id?: string
-  assetId?: string
-  driver_name?: string
-  driverName?: string
-  speed?: number | string
-  battery_percent?: number
-  batteryPercent?: number
-  energy?: string
-  status?: string
-  status_label?: string
-  statusLabel?: string
-}
-
-type FleetClearanceStatus = 'optimal' | 'critical' | 'docking'
-
-interface FleetAsset {
-  assetId: string
-  driverName: string
-  speed: string
-  energy: string
-  batteryPercent: number
-  status: FleetClearanceStatus
-  statusLabel: string
-}
-
-function parseBatteryPercent(energy: string, explicit?: number): number {
-  if (explicit !== undefined && !Number.isNaN(explicit)) return explicit
-  const match = energy.match(/(\d+)%/)
-  return match ? Number(match[1]) : 0
-}
-
-function mapDriverRowToData(row: DriverRow): DriverData {
-  return {
-    fullName: row.full_name ?? row.fullName ?? row.name ?? 'Unknown Driver',
-    documentType: row.document_type ?? row.documentType ?? 'Estonian Class-B National License',
-    personalCode: String(row.personal_code ?? row.personalCode ?? row.isikukood ?? '—'),
-    licenseNumber: row.license_number ?? row.licenseNumber ?? '—',
-    expiryDate: row.expiry_date ?? row.expiryDate ?? '—',
-    status: 'VERIFIED & REGISTERED',
-  }
-}
-
-function applyDriverFallback(): DriverData {
-  return {
-    fullName: 'Jürgen Tamm',
-    documentType: 'Estonian Class-B National License',
-    personalCode: '39001010006',
-    licenseNumber: 'EE-B0984122',
-    expiryDate: '12 / 11 / 2026',
-    status: 'VERIFIED & REGISTERED',
-  }
-}
-
-function applyFleetFallback(): FleetAsset[] {
-  const fallbackAssets: VehicleRow[] = [
-    {
-      asset_id: 'EE-FLEET-991',
-      driver_name: 'Jürgen Tamm',
-      speed: '84 km/h',
-      energy: '72% Electric EV',
-      status_label: 'OPTIMAL CLEARANCE',
-    },
-    {
-      asset_id: 'EE-FLEET-402',
-      driver_name: 'Mari Ots',
-      speed: '0 km/h (Stationary)',
-      energy: '91% Electric EV',
-      status_label: 'DOCK CHARGING',
-    },
-    {
-      asset_id: 'EE-FLEET-118',
-      driver_name: 'Kristjan Kivi',
-      speed: '112 km/h (High)',
-      energy: '44% Diesel Engine',
-      status_label: 'CRITICAL WARNING',
-    },
-  ]
-  return fallbackAssets.map(mapVehicleToFleetAsset)
-}
-
-function resolveFleetStatus(statusLabel: string, rawStatus?: string): FleetClearanceStatus {
-  const label = statusLabel.toUpperCase()
-  const raw = rawStatus?.toLowerCase() ?? ''
-  if (label.includes('CRITICAL') || raw === 'critical') return 'critical'
-  if (label.includes('DOCK') || label.includes('CHARGING') || raw === 'docking') return 'docking'
-  return 'optimal'
-}
-
-function mapVehicleToFleetAsset(row: VehicleRow): FleetAsset {
-  const energy = row.energy ?? `${row.battery_percent ?? row.batteryPercent ?? 0}% Electric EV`
-  const batteryPercent = parseBatteryPercent(
-    energy,
-    row.battery_percent ?? row.batteryPercent,
-  )
-  const statusLabel =
-    row.status_label ??
-    row.statusLabel ??
-    (row.status?.toLowerCase() === 'critical' ? 'CRITICAL WARNING' : 'OPTIMAL CLEARANCE')
-  const status = resolveFleetStatus(statusLabel, row.status)
-
-  return {
-    assetId: row.asset_id ?? row.assetId ?? `EE-FLEET-${row.id ?? '000'}`,
-    driverName: row.driver_name ?? row.driverName ?? 'Unassigned',
-    speed:
-      typeof row.speed === 'number'
-        ? `${row.speed} km/h`
-        : String(row.speed ?? '0 km/h'),
-    energy,
-    batteryPercent,
-    status,
-    statusLabel,
-  }
-}
 
 const FLEET_TELEMETRY_INTERVAL_MS = 3000
 const MAX_FLEET_SPEED_KMH = 129
@@ -562,14 +418,7 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
         }
       } catch {
         if (!cancelled) {
-          setDriverData({
-            fullName: 'Jürgen Tamm',
-            documentType: 'Estonian Class-B National License',
-            personalCode: '39001010006',
-            licenseNumber: 'EE-B0984122',
-            expiryDate: '12 / 11 / 2026',
-            status: 'VERIFIED & REGISTERED',
-          })
+          setDriverData(applyDriverFallback())
         }
       } finally {
         if (!cancelled) setDriversLoading(false)
@@ -583,34 +432,11 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
         if (!error && rows.length > 0) {
           setFleetAssets(rows.map(mapVehicleToFleetAsset))
         } else {
-          setFleetAssets(applyFleetFallback())
+          setFleetAssets(applyFleetFallback(mapVehicleToFleetAsset))
         }
       } catch {
         if (!cancelled) {
-          const fallbackAssets: VehicleRow[] = [
-            {
-              asset_id: 'EE-FLEET-991',
-              driver_name: 'Jürgen Tamm',
-              speed: '84 km/h',
-              energy: '72% Electric EV',
-              status_label: 'OPTIMAL CLEARANCE',
-            },
-            {
-              asset_id: 'EE-FLEET-402',
-              driver_name: 'Mari Ots',
-              speed: '0 km/h (Stationary)',
-              energy: '91% Electric EV',
-              status_label: 'DOCK CHARGING',
-            },
-            {
-              asset_id: 'EE-FLEET-118',
-              driver_name: 'Kristjan Kivi',
-              speed: '112 km/h (High)',
-              energy: '44% Diesel Engine',
-              status_label: 'CRITICAL WARNING',
-            },
-          ]
-          setFleetAssets(fallbackAssets.map(mapVehicleToFleetAsset))
+          setFleetAssets(applyFleetFallback(mapVehicleToFleetAsset))
         }
       } finally {
         if (!cancelled) setVehiclesLoading(false)
