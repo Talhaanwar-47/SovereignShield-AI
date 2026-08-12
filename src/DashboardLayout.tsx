@@ -38,11 +38,11 @@ import {
   Bar,
   Legend,
 } from 'recharts'
-import { supabase } from './supabaseClient'
 import { applyDriverFallback, applyFleetFallback } from './data/fallbacks'
-import { mapDriverRowToData, mapVehicleToFleetAsset } from './data/mappers'
-import type { DriverData, DriverRow, OcrPipelinePhase, OcrResult } from './types/driver'
-import type { FleetAsset, FleetClearanceStatus, VehicleRow } from './types/fleet'
+import { mapVehicleToFleetAsset } from './data/mappers'
+import { fetchDrivers, fetchVehicles } from './services/fleetService'
+import type { DriverData, OcrPipelinePhase, OcrResult } from './types/driver'
+import type { FleetAsset, FleetClearanceStatus } from './types/fleet'
 
 interface DashboardProps {
   role: string
@@ -407,15 +407,9 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
       setVehiclesLoading(true)
 
       try {
-        const { data, error } = await supabase.from('drivers').select('*')
+        const driverData = await fetchDrivers()
         if (cancelled) return
-
-        const rows = (data as DriverRow[]) ?? []
-        if (!error && rows.length > 0) {
-          setDriverData(mapDriverRowToData(rows[0]))
-        } else {
-          setDriverData(applyDriverFallback())
-        }
+        setDriverData(driverData)
       } catch {
         if (!cancelled) {
           setDriverData(applyDriverFallback())
@@ -425,15 +419,9 @@ export default function DashboardLayout({ role, onLogout }: DashboardProps) {
       }
 
       try {
-        const { data, error } = await supabase.from('vehicles').select('*')
+        const fleetAssets = await fetchVehicles()
         if (cancelled) return
-
-        const rows = (data as VehicleRow[]) ?? []
-        if (!error && rows.length > 0) {
-          setFleetAssets(rows.map(mapVehicleToFleetAsset))
-        } else {
-          setFleetAssets(applyFleetFallback(mapVehicleToFleetAsset))
-        }
+        setFleetAssets(fleetAssets)
       } catch {
         if (!cancelled) {
           setFleetAssets(applyFleetFallback(mapVehicleToFleetAsset))
