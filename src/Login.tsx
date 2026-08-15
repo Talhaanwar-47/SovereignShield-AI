@@ -10,18 +10,11 @@ import {
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react'
+import { isValidEstonianIsikukood } from './utils/isikukoodValidation'
+import { signInWithGoogle } from './services/authSession'
+import { recordAuditEvent } from './services/auditEventService'
 
 export type UserRole = 'admin' | 'fleet-manager' | 'driver'
-
-export interface LoginPayload {
-  role: UserRole
-  method: 'smart-id' | 'mobile-id' | 'google'
-  identifier?: string
-}
-
-interface LoginProps {
-  onLogin?: (payload: LoginPayload) => void
-}
 
 type AuthMethod = 'smart-id' | 'mobile-id'
 
@@ -54,16 +47,17 @@ function GoogleIcon() {
   )
 }
 
-function isValidIsikukood(code: string): boolean {
-  return /^\d{11}$/.test(code)
-}
-
 function isValidPhone(phone: string): boolean {
   const digits = phone.replace(/\D/g, '')
   return digits.length >= 7 && digits.length <= 15
 }
 
-export default function Login({ onLogin }: LoginProps) {
+/**
+ * Login UI: Google uses real Supabase Auth OAuth.
+ * Smart-ID / Mobile-ID remain mock/demo and never grant dashboard access.
+ * Demo role tabs are cosmetic only — not authorization and never sent to App/profile.
+ */
+export default function Login() {
   const [role, setRole] = useState<UserRole>('admin')
   const [authMethod, setAuthMethod] = useState<AuthMethod>('smart-id')
   const [isikukood, setIsikukood] = useState('')
@@ -77,41 +71,87 @@ export default function Login({ onLogin }: LoginProps) {
     setSuccess(null)
   }
 
-  const simulateAuth = async (
-    method: LoginPayload['method'],
-    identifier?: string,
-  ) => {
+  /** Mock-only demo flows — do not create a Supabase session. */
+  const simulateMockAuth = async (method: 'smart-id' | 'mobile-id', identifier?: string) => {
     clearStatus()
     setLoading(true)
     await new Promise((r) => setTimeout(r, 1400))
     setLoading(false)
+    recordAuditEvent({
+      category: 'Authentication',
+      action: 'Mock authentication denied (demo only)',
+      actorDisplayName: 'Unauthenticated user',
+      resourceType: 'AuthMethod',
+      resourceDisplayId: method === 'smart-id' ? 'Smart-ID (Demo)' : 'Mobile-ID (Demo)',
+      severity: 'WARNING',
+      result: 'DENIED',
+      source: 'client-login-demo',
+    })
     setSuccess(
-      method === 'google'
-        ? `Signed in with Google as ${ROLES.find((r) => r.id === role)?.label}`
-        : method === 'smart-id'
-          ? `Smart-ID verified for ${identifier}`
-          : `Mobile-ID challenge sent to ${identifier}`,
+      method === 'smart-id'
+        ? `Demo only · Mock Smart-ID for ${identifier} — does not grant access. Use Google to sign in.`
+        : `Demo only · Mock Mobile-ID for ${identifier} — does not grant access. Use Google to sign in.`,
     )
-    onLogin?.({ role, method, identifier })
   }
 
   const handleSmartId = async () => {
-    if (!isValidIsikukood(isikukood)) {
-      setError('Enter a valid 11-digit Isikukood (Personal Code).')
+    if (!isValidEstonianIsikukood(isikukood)) {
+      setError('Enter a valid 11-digit Estonian Isikukood (Personal Code).')
+      recordAuditEvent({
+        category: 'Authentication',
+        action: 'Smart-ID validation failed',
+        actorDisplayName: 'Unauthenticated user',
+        resourceType: 'AuthMethod',
+        resourceDisplayId: 'Smart-ID (Demo)',
+        severity: 'WARNING',
+        result: 'FAILED',
+        source: 'client-login-demo',
+      })
       return
     }
-    await simulateAuth('smart-id', isikukood)
+    await simulateMockAuth('smart-id', isikukood)
   }
 
   const handleMobileId = async () => {
     if (!isValidPhone(phone)) {
       setError('Enter a valid phone number with country code.')
+      recordAuditEvent({
+        category: 'Authentication',
+        action: 'Mobile-ID validation failed',
+        actorDisplayName: 'Unauthenticated user',
+        resourceType: 'AuthMethod',
+        resourceDisplayId: 'Mobile-ID (Demo)',
+        severity: 'WARNING',
+        result: 'FAILED',
+        source: 'client-login-demo',
+      })
       return
     }
-    await simulateAuth('mobile-id', phone)
+    await simulateMockAuth('mobile-id', phone)
   }
 
-  const handleGoogle = () => simulateAuth('google')
+  const handleGoogle = async () => {
+    clearStatus()
+    setLoading(true)
+    const result = await signInWithGoogle()
+    if (result.errorMessage) {
+      recordAuditEvent({
+        category: 'Authentication',
+        action: 'Google sign-in failed',
+        actorDisplayName: 'Unauthenticated user',
+        resourceType: 'AuthMethod',
+        resourceDisplayId: 'Google OAuth',
+        severity: 'WARNING',
+        result: 'FAILED',
+        source: 'client-auth-session',
+      })
+      setError(result.errorMessage)
+      setLoading(false)
+      return
+    }
+    // Browser redirects to Google / Supabase; session is restored on return.
+    setSuccess('Redirecting to Google sign-in…')
+  }
 
   const formatIsikukood = (value: string) => value.replace(/\D/g, '').slice(0, 11)
 
@@ -144,10 +184,10 @@ export default function Login({ onLogin }: LoginProps) {
 
         {/* Glass card */}
         <div className="overflow-hidden rounded-3xl border border-white/12 bg-white/6 shadow-2xl shadow-black/40 backdrop-blur-2xl">
-          {/* Role tabs */}
+          {/* Role tabs — cosmetic / demo only */}
           <div className="border-b border-white/8 bg-white/3 p-1.5">
             <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">
-              Demo role
+              Demo role (display only)
             </p>
             <div className="grid grid-cols-3 gap-1">
               {ROLES.map(({ id, label, icon: Icon, description }) => {
@@ -217,7 +257,7 @@ export default function Login({ onLogin }: LoginProps) {
               })}
             </div>
 
-            {/* Smart-ID form */}
+            {/* Smart-ID form — mock only */}
             {authMethod === 'smart-id' && (
               <div className="space-y-4 animate-in fade-in duration-300">
                 <div>
@@ -247,7 +287,7 @@ export default function Login({ onLogin }: LoginProps) {
                     />
                   </div>
                   <p className="mt-2 text-[11px] text-white/30">
-                    Estonia&apos;s national identity — mock verification for demo
+                    Estonia&apos;s national identity — mock verification for demo (does not sign you in)
                   </p>
                 </div>
 
@@ -265,14 +305,14 @@ export default function Login({ onLogin }: LoginProps) {
                   ) : (
                     <>
                       <Fingerprint className="h-4 w-4" />
-                      Continue with Smart-ID
+                      Continue with Smart-ID (Demo)
                     </>
                   )}
                 </button>
               </div>
             )}
 
-            {/* Mobile-ID form */}
+            {/* Mobile-ID form — mock only */}
             {authMethod === 'mobile-id' && (
               <div className="space-y-4 animate-in fade-in duration-300">
                 <div>
@@ -301,7 +341,7 @@ export default function Login({ onLogin }: LoginProps) {
                     />
                   </div>
                   <p className="mt-2 text-[11px] text-white/30">
-                    A verification code will appear on your phone — mock flow
+                    Mock Mobile-ID flow — does not create a real session
                   </p>
                 </div>
 
@@ -319,7 +359,7 @@ export default function Login({ onLogin }: LoginProps) {
                   ) : (
                     <>
                       <Smartphone className="h-4 w-4" />
-                      Continue with Mobile-ID
+                      Continue with Mobile-ID (Demo)
                     </>
                   )}
                 </button>
@@ -335,11 +375,13 @@ export default function Login({ onLogin }: LoginProps) {
               <div className="h-px flex-1 bg-white/8" />
             </div>
 
-            {/* Google OAuth */}
+            {/* Google OAuth — real Supabase Auth */}
             <button
               type="button"
               disabled={loading}
-              onClick={handleGoogle}
+              onClick={() => {
+                void handleGoogle()
+              }}
               className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/12 bg-white/8 py-3 text-sm font-medium text-white/90 backdrop-blur-sm transition hover:border-white/20 hover:bg-white/12 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? (
@@ -349,6 +391,9 @@ export default function Login({ onLogin }: LoginProps) {
               )}
               Continue with Google
             </button>
+            <p className="mt-2 text-center text-[11px] text-white/30">
+              Real Supabase Auth (Google OAuth). Requires Google provider enabled in your project.
+            </p>
 
             {/* Status messages */}
             {error && (
@@ -367,7 +412,7 @@ export default function Login({ onLogin }: LoginProps) {
         </div>
 
         <p className="mt-6 text-center text-[11px] text-white/25">
-          Mock authentication for recruiter demos · No real credentials required
+          Smart-ID / Mobile-ID are demo-only · Dashboard requires a real Google sign-in session
         </p>
       </div>
     </div>

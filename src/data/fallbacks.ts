@@ -8,31 +8,35 @@ export function applyDriverFallback(): DriverData {
     personalCode: '39001010006',
     licenseNumber: 'EE-B0984122',
     expiryDate: '12 / 11 / 2026',
-    status: 'VERIFIED & REGISTERED',
+    status: 'DEMO RECORD',
   }
 }
 
+/**
+ * Demo fleet fixtures — intentionally unassigned.
+ * Denormalized driver_name text (if present remotely) is not used by the mapper.
+ */
 const FALLBACK_VEHICLE_ROWS: VehicleRow[] = [
   {
     asset_id: 'EE-FLEET-991',
-    driver_name: 'Jürgen Tamm',
+    assigned_driver_id: null,
     speed: '84 km/h',
-    energy: '72% Electric EV',
-    status_label: 'OPTIMAL CLEARANCE',
+    battery: '72% Electric EV',
+    compliance_tier: 'OPTIMAL CLEARANCE',
   },
   {
     asset_id: 'EE-FLEET-402',
-    driver_name: 'Mari Ots',
+    assigned_driver_id: null,
     speed: '0 km/h (Stationary)',
-    energy: '91% Electric EV',
-    status_label: 'DOCK CHARGING',
+    battery: '91% Electric EV',
+    compliance_tier: 'DOCK CHARGING',
   },
   {
     asset_id: 'EE-FLEET-118',
-    driver_name: 'Kristjan Kivi',
+    assigned_driver_id: null,
     speed: '112 km/h (High)',
-    energy: '44% Diesel Engine',
-    status_label: 'CRITICAL WARNING',
+    battery: '44% Diesel Engine',
+    compliance_tier: 'CRITICAL WARNING',
   },
 ]
 

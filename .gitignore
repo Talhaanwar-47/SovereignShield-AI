@@ -24,3 +24,8 @@ dist-ssr
 *.sw?
 
 .env
+
+# Recovery / backup codes (never commit)
+recovery-codes.txt
+
+supabase/.temp/
