@@ -1,4 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import authSessionSource from './authSession.ts?raw'
+import loginSource from '../Login.tsx?raw'
+
+const OLD_PREVIEW_DEPLOYMENT_URL =
+  'sovereign-shield-ai-a6l5kv9ss-talha-portfolio2.vercel.app'
+const PRODUCTION_SITE_URL = 'https://sovereign-shield-ai.vercel.app'
 
 const { getSessionMock, onAuthStateChangeMock, signInWithOAuthMock, signOutMock } =
   vi.hoisted(() => ({
@@ -23,6 +29,7 @@ import {
   displayLabelForSession,
   getCurrentSession,
   hasAuthenticatedSession,
+  resolveOAuthRedirectUrl,
   signInWithGoogle,
   signOut,
   subscribeToAuthState,
@@ -72,6 +79,7 @@ describe('authSession helpers', () => {
 
   it('signInWithGoogle uses the Google OAuth provider', async () => {
     signInWithOAuthMock.mockResolvedValue({ data: {}, error: null })
+    vi.stubEnv('VITE_SITE_URL', '')
     vi.stubGlobal('window', { location: { origin: 'http://localhost:5173' } })
 
     await expect(signInWithGoogle()).resolves.toEqual({})
@@ -85,7 +93,50 @@ describe('authSession helpers', () => {
       },
     })
 
+    vi.unstubAllEnvs()
     vi.unstubAllGlobals()
+  })
+
+  it('resolveOAuthRedirectUrl uses VITE_SITE_URL for stable production OAuth redirect', () => {
+    vi.stubEnv('VITE_SITE_URL', PRODUCTION_SITE_URL)
+    vi.stubGlobal('window', {
+      location: { origin: `https://${OLD_PREVIEW_DEPLOYMENT_URL}` },
+    })
+
+    expect(resolveOAuthRedirectUrl()).toBe(`${PRODUCTION_SITE_URL}/`)
+
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  it('signInWithGoogle prefers configured production site URL over preview browser origin', async () => {
+    signInWithOAuthMock.mockResolvedValue({ data: {}, error: null })
+    vi.stubEnv('VITE_SITE_URL', PRODUCTION_SITE_URL)
+    vi.stubGlobal('window', {
+      location: { origin: `https://${OLD_PREVIEW_DEPLOYMENT_URL}` },
+    })
+
+    await expect(signInWithGoogle()).resolves.toEqual({})
+
+    expect(signInWithOAuthMock).toHaveBeenCalledWith({
+      provider: 'google',
+      options: {
+        redirectTo: `${PRODUCTION_SITE_URL}/`,
+        skipBrowserRedirect: false,
+        queryParams: { prompt: 'select_account' },
+      },
+    })
+
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  it('does not hardcode old preview deployment URLs in auth sources', () => {
+    expect(authSessionSource).not.toContain(OLD_PREVIEW_DEPLOYMENT_URL)
+    expect(loginSource).not.toContain(OLD_PREVIEW_DEPLOYMENT_URL)
+    expect(authSessionSource).toContain('signInWithOAuth')
+    expect(authSessionSource).toContain('VITE_SITE_URL')
+    expect(loginSource).toContain('signInWithGoogle')
   })
 
   it('signInWithGoogle maps provider errors to a safe message', async () => {
