@@ -1,15 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import authSessionSource from './authSession.ts?raw'
 import loginSource from '../Login.tsx?raw'
+import supabaseClientSource from '../supabaseClient.ts?raw'
+import appSource from '../App.tsx?raw'
 
 const OLD_PREVIEW_DEPLOYMENT_URL =
   'sovereign-shield-ai-a6l5kv9ss-talha-portfolio2.vercel.app'
 const PRODUCTION_SITE_URL = 'https://sovereign-shield-ai.vercel.app'
 
-const { getSessionMock, initializeMock, onAuthStateChangeMock, signInWithOAuthMock, signOutMock } =
+const { getSessionMock, onAuthStateChangeMock, signInWithOAuthMock, signOutMock } =
   vi.hoisted(() => ({
     getSessionMock: vi.fn(),
-    initializeMock: vi.fn(),
     onAuthStateChangeMock: vi.fn(),
     signInWithOAuthMock: vi.fn(),
     signOutMock: vi.fn(),
@@ -18,7 +19,6 @@ const { getSessionMock, initializeMock, onAuthStateChangeMock, signInWithOAuthMo
 vi.mock('../supabaseClient', () => ({
   supabase: {
     auth: {
-      initialize: initializeMock,
       getSession: getSessionMock,
       onAuthStateChange: onAuthStateChangeMock,
       signInWithOAuth: signInWithOAuthMock,
@@ -31,7 +31,11 @@ import {
   displayLabelForSession,
   getCurrentSession,
   hasAuthenticatedSession,
+  isAuthBootstrapEvent,
+  isImplicitOAuthCallbackUrl,
+  resolveAuthBootstrapSession,
   resolveOAuthRedirectUrl,
+  restoreSessionAfterImplicitOAuthCallback,
   signInWithGoogle,
   signOut,
   subscribeToAuthState,
@@ -40,16 +44,6 @@ import {
 describe('authSession helpers', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    initializeMock.mockResolvedValue({ error: null })
-  })
-
-  it('getCurrentSession waits for auth initialization before reading the session', async () => {
-    const session = { user: { id: 'user-1' } }
-    getSessionMock.mockResolvedValue({ data: { session }, error: null })
-
-    await expect(getCurrentSession()).resolves.toBe(session)
-    expect(initializeMock).toHaveBeenCalledTimes(1)
-    expect(getSessionMock).toHaveBeenCalledTimes(1)
   })
 
   it('getCurrentSession returns the Supabase session when present', async () => {
@@ -185,6 +179,23 @@ describe('authSession helpers', () => {
     expect(loginSource).toContain('signInWithGoogle')
   })
 
+  it('configures implicit OAuth session detection in the Supabase browser client', () => {
+    expect(supabaseClientSource).toContain("flowType: 'implicit'")
+    expect(supabaseClientSource).toContain('detectSessionInUrl: true')
+    expect(supabaseClientSource).toContain('persistSession: true')
+    expect(supabaseClientSource).toContain('autoRefreshToken: true')
+    expect(supabaseClientSource).toContain('onAuthStateChange')
+  })
+
+  it('restores implicit OAuth callbacks through Supabase session APIs in App', () => {
+    expect(appSource).toContain('resolveAuthBootstrapSession')
+    expect(appSource).toContain('isAuthBootstrapEvent')
+    expect(appSource).toContain('logAuthBootstrapDiagnostic')
+    expect(appSource).toContain('subscribeToAuthState')
+    expect(authSessionSource).toContain('resolveAuthBootstrapSession')
+    expect(authSessionSource).not.toMatch(/access_token\s*[:=]\s*['"]/)
+  })
+
   it('signInWithGoogle maps provider errors to a safe message', async () => {
     signInWithOAuthMock.mockResolvedValue({
       data: {},
@@ -209,5 +220,56 @@ describe('authSession helpers', () => {
     const session = { user: { id: 'user-1' } } as never
     expect(hasAuthenticatedSession(session)).toBe(true)
     expect(displayLabelForSession(session)).toBe('Authenticated')
+  })
+
+  it('isImplicitOAuthCallbackUrl detects implicit OAuth hash callbacks by parameter name', () => {
+    expect(
+      isImplicitOAuthCallbackUrl(
+        'https://sovereign-shield-ai.vercel.app/#access_token=redacted&refresh_token=redacted',
+      ),
+    ).toBe(true)
+    expect(
+      isImplicitOAuthCallbackUrl('https://sovereign-shield-ai.vercel.app/#error=access_denied'),
+    ).toBe(true)
+    expect(isImplicitOAuthCallbackUrl('https://sovereign-shield-ai.vercel.app/')).toBe(false)
+    expect(isImplicitOAuthCallbackUrl('https://sovereign-shield-ai.vercel.app/?code=abc')).toBe(
+      false,
+    )
+  })
+
+  it('restoreSessionAfterImplicitOAuthCallback reads the session via getSession', async () => {
+    const session = { user: { id: 'oauth-user' } }
+    getSessionMock.mockResolvedValue({ data: { session }, error: null })
+
+    await expect(restoreSessionAfterImplicitOAuthCallback()).resolves.toBe(session)
+    expect(getSessionMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('isAuthBootstrapEvent identifies INITIAL_SESSION and SIGNED_IN', () => {
+    expect(isAuthBootstrapEvent('INITIAL_SESSION')).toBe(true)
+    expect(isAuthBootstrapEvent('SIGNED_IN')).toBe(true)
+    expect(isAuthBootstrapEvent('TOKEN_REFRESHED')).toBe(false)
+  })
+
+  it('resolveAuthBootstrapSession uses the event session when present', async () => {
+    const session = { user: { id: 'oauth-user' } } as never
+
+    await expect(resolveAuthBootstrapSession('INITIAL_SESSION', session)).resolves.toBe(session)
+    expect(getSessionMock).not.toHaveBeenCalled()
+  })
+
+  it('resolveAuthBootstrapSession falls back to getSession when INITIAL_SESSION is null', async () => {
+    const session = { user: { id: 'oauth-user' } }
+    getSessionMock.mockResolvedValue({ data: { session }, error: null })
+
+    await expect(resolveAuthBootstrapSession('INITIAL_SESSION', null)).resolves.toBe(session)
+    expect(getSessionMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('resolveAuthBootstrapSession falls back to getSession after implicit OAuth hash consumption', async () => {
+    const session = { user: { id: 'oauth-user' } }
+    getSessionMock.mockResolvedValue({ data: { session }, error: null })
+
+    await expect(resolveAuthBootstrapSession('INITIAL_SESSION', null)).resolves.toBe(session)
   })
 })

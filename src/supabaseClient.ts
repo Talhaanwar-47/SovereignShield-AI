@@ -2,14 +2,16 @@ import { createClient } from '@supabase/supabase-js'
 
 /**
  * Browser Supabase client (anon key).
- * Auth sessions are restored from URL hash/query after OAuth redirect
- * and persisted by supabase-js (detectSessionInUrl defaults to true).
+ * Production Google OAuth returns implicit-grant tokens in the URL hash
+ * (#access_token=…); detectSessionInUrl must stay enabled with flowType
+ * 'implicit' so supabase-js consumes the hash via its normal browser handler.
  */
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY,
   {
     auth: {
+      flowType: 'implicit',
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
@@ -18,8 +20,8 @@ export const supabase = createClient(
 )
 
 /**
- * Register before React mounts so OAuth PKCE callbacks that emit SIGNED_IN via
- * setTimeout(0) during client initialization are not dropped.
+ * Register immediately after createClient so implicit OAuth callbacks that emit
+ * SIGNED_IN during initialization are not dropped before React mounts.
  */
 supabase.auth.onAuthStateChange(() => {
   // Intentionally empty — primes the auth listener before App subscribes.

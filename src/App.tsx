@@ -11,13 +11,13 @@ import {
   type MembershipRole,
 } from './services/authProfile'
 import { provisionDemoMembership } from './services/demoProvisioning'
-import {
-  mergeAuthSessionState,
-  resolveAppShellView,
-  shouldMarkAuthReady,
-} from './authAppGate'
+import { mergeAuthSessionState, resolveAppShellView } from './authAppGate'
 import {
   hasAuthenticatedSession,
+  isAuthBootstrapEvent,
+  isImplicitOAuthCallbackUrl,
+  logAuthBootstrapDiagnostic,
+  resolveAuthBootstrapSession,
   signOut,
   subscribeToAuthState,
 } from './services/authSession'
@@ -44,26 +44,49 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
+    let bootstrapped = false
 
     const unsubscribe = subscribeToAuthState((event, nextSession) => {
       if (cancelled) return
 
-      setSession((previous) => mergeAuthSessionState(previous, event, nextSession))
-      setAuthReady((ready) => shouldMarkAuthReady(event, ready))
+      if (!bootstrapped && isAuthBootstrapEvent(event)) {
+        void (async () => {
+          const resolved = await resolveAuthBootstrapSession(event, nextSession)
 
-      const user = nextSession?.user
-      if (event === 'INITIAL_SESSION' && user) {
-        recordAuditEvent({
-          category: 'Authentication',
-          action: 'Session restored',
-          actorDisplayName: displayNameFromUser(user),
-          actorUserId: user.id,
-          severity: 'INFO',
-          result: 'SUCCESS',
-          source: 'client-auth-session',
-        })
+          logAuthBootstrapDiagnostic({
+            event,
+            eventSessionPresent: Boolean(nextSession),
+            resolvedSessionPresent: Boolean(resolved),
+            oauthHashPresent: isImplicitOAuthCallbackUrl(),
+          })
+
+          if (cancelled || bootstrapped) return
+
+          bootstrapped = true
+          setSession(resolved)
+          setAuthReady(true)
+
+          const user = resolved?.user
+          if (user) {
+            recordAuditEvent({
+              category: 'Authentication',
+              action: event === 'SIGNED_IN' ? 'User signed in' : 'Session restored',
+              actorDisplayName: displayNameFromUser(user),
+              actorUserId: user.id,
+              severity: 'INFO',
+              result: 'SUCCESS',
+              source: 'client-auth-session',
+            })
+          }
+        })()
+        return
       }
 
+      if (!bootstrapped) return
+
+      setSession((previous) => mergeAuthSessionState(previous, event, nextSession))
+
+      const user = nextSession?.user
       if (event === 'SIGNED_IN' && user) {
         recordAuditEvent({
           category: 'Authentication',

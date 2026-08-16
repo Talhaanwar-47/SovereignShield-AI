@@ -55,7 +55,7 @@ export function mergeAuthSessionState(
   return previous
 }
 
-/** Auth bootstrap completes on INITIAL_SESSION or a late OAuth SIGNED_IN. */
+/** @deprecated App completes bootstrap asynchronously; kept for unit tests. */
 export function shouldMarkAuthReady(event: AuthChangeEvent, authReady: boolean): boolean {
   if (authReady) return true
   return event === 'INITIAL_SESSION' || event === 'SIGNED_IN'

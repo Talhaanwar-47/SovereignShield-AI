@@ -5,17 +5,88 @@ export type AuthSessionState = {
   session: Session | null
 }
 
+export type AuthBootstrapDiagnostic = {
+  event: AuthChangeEvent
+  eventSessionPresent: boolean
+  resolvedSessionPresent: boolean
+  oauthHashPresent: boolean
+}
+
+/** DEV-only bootstrap tracing — never logs tokens, codes, or URL fragments. */
+export function logAuthBootstrapDiagnostic(detail: AuthBootstrapDiagnostic): void {
+  if (!import.meta.env.DEV) return
+  console.info('[auth-bootstrap]', {
+    event: detail.event,
+    eventSessionPresent: detail.eventSessionPresent,
+    resolvedSessionPresent: detail.resolvedSessionPresent,
+    oauthHashPresent: detail.oauthHashPresent,
+  })
+}
+
 /**
- * Waits for Supabase Auth initialization (including OAuth callback URL processing).
- * Does not invent sessions or JWTs.
+ * Reads the current Supabase Auth session after client initialization.
+ * Does not invent sessions or JWTs and never parses OAuth tokens manually.
  */
 export async function getCurrentSession(): Promise<Session | null> {
-  await supabase.auth.initialize()
   const { data, error } = await supabase.auth.getSession()
   if (error) {
     return null
   }
   return data.session
+}
+
+export function isAuthBootstrapEvent(event: AuthChangeEvent): boolean {
+  return event === 'INITIAL_SESSION' || event === 'SIGNED_IN'
+}
+
+/**
+ * Resolves the session for the first auth bootstrap event.
+ * When Supabase emits INITIAL_SESSION null (common after implicit OAuth hash
+ * consumption), fall back to getSession() so persisted sessions are not missed.
+ */
+export async function resolveAuthBootstrapSession(
+  event: AuthChangeEvent,
+  eventSession: Session | null,
+): Promise<Session | null> {
+  if (eventSession) return eventSession
+  if (isAuthBootstrapEvent(event)) {
+    return getCurrentSession()
+  }
+  return null
+}
+
+/**
+ * True when the browser URL looks like a Supabase implicit OAuth callback.
+ * Checks parameter names only — never reads or exposes credential values.
+ */
+export function isImplicitOAuthCallbackUrl(href?: string): boolean {
+  if (typeof window === 'undefined' && href === undefined) return false
+
+  try {
+    const url = new URL(href ?? window.location.href)
+    if (!url.hash || url.hash.length <= 1) return false
+
+    const hashParams = new URLSearchParams(
+      url.hash.startsWith('#') ? url.hash.slice(1) : url.hash,
+    )
+
+    return (
+      hashParams.has('access_token') ||
+      hashParams.has('error') ||
+      hashParams.has('error_description')
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * After an implicit OAuth redirect, read the session supabase-js restored via
+ * detectSessionInUrl (never parses access_token/refresh_token manually).
+ * @deprecated Prefer resolveAuthBootstrapSession during App bootstrap.
+ */
+export async function restoreSessionAfterImplicitOAuthCallback(): Promise<Session | null> {
+  return getCurrentSession()
 }
 
 /**
