@@ -29,6 +29,7 @@ vi.mock('../supabaseClient', () => ({
 
 import {
   displayLabelForSession,
+  deferAfterAuthStateChange,
   getCurrentSession,
   hasAuthenticatedSession,
   isAuthBootstrapEvent,
@@ -192,24 +193,74 @@ describe('authSession helpers', () => {
   it('App defers React auth state until runFirstAuthBootstrap resolves', () => {
     expect(appSource).toContain('applyAuthListenerEvent')
     expect(appSource).toContain('runFirstAuthBootstrap')
+    expect(appSource).toContain('deferAfterAuthStateChange')
     expect(appSource).toContain('logAuthBootstrapDiagnostic')
     expect(appSource).toContain('subscribeToAuthState')
     expect(appSource).not.toContain('shouldMarkAuthReady')
     expect(appSource).not.toContain('mergeAuthSessionState')
     expect(appSource).not.toContain('resolveAuthBootstrapSession')
     expect(appSource).not.toContain('finishAuthBootstrap')
+    expect(appSource).not.toMatch(/void\s*\(\s*async\s*\(\)\s*=>\s*\{[\s\S]*runFirstAuthBootstrap/)
     expect(authSessionSource).toContain('resolveAuthBootstrapSession')
     expect(authSessionSource).not.toMatch(/await supabase\.auth\.initialize\s*\(/)
     expect(authSessionSource).not.toMatch(/access_token\s*[:=]\s*['"]/)
 
     const bootstrapBlock = appSource.slice(appSource.indexOf('shouldResolveBootstrap'))
+    const deferIndex = bootstrapBlock.indexOf('deferAfterAuthStateChange')
     const bootstrapAwaitIndex = bootstrapBlock.indexOf('await runFirstAuthBootstrap')
     const setSessionIndex = bootstrapBlock.indexOf('setSession(')
     const setAuthReadyIndex = bootstrapBlock.indexOf('setAuthReady(')
 
-    expect(bootstrapAwaitIndex).toBeGreaterThan(-1)
+    expect(deferIndex).toBeGreaterThan(-1)
+    expect(bootstrapAwaitIndex).toBeGreaterThan(deferIndex)
     expect(setSessionIndex).toBeGreaterThan(bootstrapAwaitIndex)
     expect(setAuthReadyIndex).toBeGreaterThan(setSessionIndex)
+  })
+
+  it('deferAfterAuthStateChange prevents getSession before onAuthStateChange returns', async () => {
+    vi.useFakeTimers()
+
+    let callbackReturned = false
+    let getSessionCalledBeforeCallbackReturned = false
+
+    getSessionMock.mockImplementation(async () => {
+      if (!callbackReturned) {
+        getSessionCalledBeforeCallbackReturned = true
+      }
+      return { data: { session: { user: { id: 'oauth-user' } } }, error: null }
+    })
+
+    const simulateUnsafeAsyncIifeBootstrap = () => {
+      void (async () => {
+        await resolveAuthBootstrapSession('INITIAL_SESSION', null)
+      })()
+    }
+
+    simulateUnsafeAsyncIifeBootstrap()
+    expect(getSessionMock).toHaveBeenCalledTimes(1)
+    expect(getSessionCalledBeforeCallbackReturned).toBe(true)
+
+    vi.clearAllMocks()
+    callbackReturned = false
+    getSessionCalledBeforeCallbackReturned = false
+
+    const simulateSafeDeferredBootstrap = () => {
+      deferAfterAuthStateChange(async () => {
+        await resolveAuthBootstrapSession('INITIAL_SESSION', null)
+      })
+    }
+
+    simulateSafeDeferredBootstrap()
+    expect(getSessionMock).not.toHaveBeenCalled()
+    expect(getSessionCalledBeforeCallbackReturned).toBe(false)
+
+    callbackReturned = true
+    await vi.runAllTimersAsync()
+
+    expect(getSessionMock).toHaveBeenCalledTimes(1)
+    expect(getSessionCalledBeforeCallbackReturned).toBe(false)
+
+    vi.useRealTimers()
   })
 
   it('signInWithGoogle maps provider errors to a safe message', async () => {
