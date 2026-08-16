@@ -7,14 +7,16 @@ import DashboardLayout from './DashboardLayout'
 import {
   fetchAuthProfile,
   displayNameFromUser,
-  hasOrganizationMembership,
-  isDemoEligible,
   type AuthProfile,
   type MembershipRole,
 } from './services/authProfile'
 import { provisionDemoMembership } from './services/demoProvisioning'
 import {
-  getCurrentSession,
+  mergeAuthSessionState,
+  resolveAppShellView,
+  shouldMarkAuthReady,
+} from './authAppGate'
+import {
   hasAuthenticatedSession,
   signOut,
   subscribeToAuthState,
@@ -43,30 +45,25 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
 
-    void (async () => {
-      const current = await getCurrentSession()
-      if (!cancelled) {
-        setSession(current)
-        setAuthReady(true)
-        if (current?.user) {
-          recordAuditEvent({
-            category: 'Authentication',
-            action: 'Session restored',
-            actorDisplayName: displayNameFromUser(current.user),
-            actorUserId: current.user.id,
-            severity: 'INFO',
-            result: 'SUCCESS',
-            source: 'client-auth-session',
-          })
-        }
-      }
-    })()
-
     const unsubscribe = subscribeToAuthState((event, nextSession) => {
-      setSession(nextSession)
-      setAuthReady(true)
+      if (cancelled) return
+
+      setSession((previous) => mergeAuthSessionState(previous, event, nextSession))
+      setAuthReady((ready) => shouldMarkAuthReady(event, ready))
 
       const user = nextSession?.user
+      if (event === 'INITIAL_SESSION' && user) {
+        recordAuditEvent({
+          category: 'Authentication',
+          action: 'Session restored',
+          actorDisplayName: displayNameFromUser(user),
+          actorUserId: user.id,
+          severity: 'INFO',
+          result: 'SUCCESS',
+          source: 'client-auth-session',
+        })
+      }
+
       if (event === 'SIGNED_IN' && user) {
         recordAuditEvent({
           category: 'Authentication',
@@ -178,9 +175,6 @@ export default function App() {
   const activeUser = session?.user
   const profileResolved = Boolean(activeUser && profileUserId === activeUser.id)
   const resolvedProfile = profileResolved ? profile : LOADING_PROFILE
-  const membershipGranted =
-    profileResolved && hasOrganizationMembership(resolvedProfile)
-  const demoEligible = profileResolved && isDemoEligible(resolvedProfile)
 
   if (!activeUser && profileUserId !== null) {
     setProfile(LOADING_PROFILE)
@@ -191,17 +185,24 @@ export default function App() {
     ? `${activeUser.id}:${resolvedProfile.membershipRole ?? 'none'}:${profileEpoch}`
     : 'anonymous'
 
+  const shellView = resolveAppShellView({
+    authReady,
+    session,
+    profileUserId,
+    profile: resolvedProfile,
+  })
+
   return (
     <div className="flex min-h-screen w-full flex-col bg-[#0b0f1a] text-white">
       <DemoModeBanner isAuthenticated={isAuthenticated} />
       <div className="w-full flex-1">
-        {!authReady ? (
+        {shellView === 'loading-auth' ? (
           <div className="flex min-h-screen items-center justify-center text-sm text-white/50">
             Checking session…
           </div>
-        ) : !isAuthenticated || !activeUser ? (
+        ) : shellView === 'login' ? (
           <Login />
-        ) : !profileResolved ? (
+        ) : shellView === 'loading-profile' ? (
           <div
             className="flex min-h-screen items-center justify-center text-sm text-white/50"
             role="status"
@@ -209,13 +210,13 @@ export default function App() {
           >
             Checking organization access…
           </div>
-        ) : membershipGranted ? (
+        ) : shellView === 'dashboard' ? (
           <DashboardLayout
             key={dashboardKey}
             displayName={resolvedProfile.displayName}
             roleLabel={resolvedProfile.roleLabel}
-            membershipRole={resolvedProfile.membershipRole}
-            userId={activeUser.id}
+            membershipRole={resolvedProfile.membershipRole!}
+            userId={activeUser!.id}
             organizationName={resolvedProfile.organizationName}
             isDemoOrganization={resolvedProfile.isDemoOrganization}
             onSwitchDemoRole={
@@ -225,7 +226,7 @@ export default function App() {
               void handleLogout()
             }}
           />
-        ) : demoEligible ? (
+        ) : shellView === 'demo-onboarding' ? (
           <DemoOnboarding
             displayName={resolvedProfile.displayName}
             onSelectRole={handleDemoRoleSelection}

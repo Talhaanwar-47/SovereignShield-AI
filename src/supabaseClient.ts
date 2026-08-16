@@ -16,3 +16,11 @@ export const supabase = createClient(
     },
   },
 )
+
+/**
+ * Register before React mounts so OAuth PKCE callbacks that emit SIGNED_IN via
+ * setTimeout(0) during client initialization are not dropped.
+ */
+supabase.auth.onAuthStateChange(() => {
+  // Intentionally empty — primes the auth listener before App subscribes.
+})

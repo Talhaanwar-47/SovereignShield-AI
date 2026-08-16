@@ -6,10 +6,11 @@ export type AuthSessionState = {
 }
 
 /**
- * Restores the current Supabase Auth session (if any).
+ * Waits for Supabase Auth initialization (including OAuth callback URL processing).
  * Does not invent sessions or JWTs.
  */
 export async function getCurrentSession(): Promise<Session | null> {
+  await supabase.auth.initialize()
   const { data, error } = await supabase.auth.getSession()
   if (error) {
     return null
@@ -38,16 +39,28 @@ export function subscribeToAuthState(
  * OAuth return URL for Supabase Google sign-in.
  * Production builds should set VITE_SITE_URL to the stable site origin so OAuth
  * does not follow transient preview deployment hostnames.
+ *
+ * PKCE stores the code verifier on the browser origin that starts OAuth, so the
+ * redirect target must match that origin or the callback session cannot be restored.
  */
 export function resolveOAuthRedirectUrl(): string | undefined {
   if (typeof window === 'undefined') return undefined
 
+  const currentOrigin = window.location.origin
   const configuredSiteUrl = import.meta.env.VITE_SITE_URL?.trim()
+
   if (configuredSiteUrl) {
-    return `${configuredSiteUrl.replace(/\/+$/, '')}/`
+    try {
+      const configuredOrigin = new URL(configuredSiteUrl).origin
+      if (configuredOrigin === currentOrigin) {
+        return `${configuredSiteUrl.replace(/\/+$/, '')}/`
+      }
+    } catch {
+      // Invalid VITE_SITE_URL — fall back to the live browser origin.
+    }
   }
 
-  return `${window.location.origin}/`
+  return `${currentOrigin}/`
 }
 
 /**

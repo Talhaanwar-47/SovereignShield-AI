@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { User } from '@supabase/supabase-js'
+import type { Session, User } from '@supabase/supabase-js'
 import appSource from '../App.tsx?raw'
+import { resolveAppShellView } from '../authAppGate'
 import loginSource from '../Login.tsx?raw'
 import dashboardSource from '../DashboardLayout.tsx?raw'
 import demoBannerSource from '../components/DemoModeBanner.tsx?raw'
@@ -42,8 +43,21 @@ import {
   parseMembershipRole,
   resolveMembershipProfile,
   isDemoEligible,
+  type AuthProfile,
 } from './authProfile'
 import { signOut } from './authSession'
+
+const LOADING_PROFILE: AuthProfile = {
+  displayName: 'Authenticated User',
+  roleLabel: 'Authenticated',
+  membershipRole: null,
+  organizationName: null,
+  isDemoOrganization: false,
+}
+
+function authSession(userId = 'user-1'): Session {
+  return { user: { id: userId } } as Session
+}
 
 function user(partial: Partial<User> & Pick<User, 'id'>): User {
   return {
@@ -325,40 +339,62 @@ describe('isDemoEligible', () => {
 
 describe('membership access gate', () => {
   it('resolves membership before rendering the dashboard shell', () => {
+    expect(
+      resolveAppShellView({
+        authReady: true,
+        session: authSession(),
+        profileUserId: null,
+        profile: LOADING_PROFILE,
+      }),
+    ).toBe('loading-profile')
+
+    expect(
+      resolveAppShellView({
+        authReady: true,
+        session: authSession(),
+        profileUserId: 'user-1',
+        profile: { ...LOADING_PROFILE, membershipRole: 'admin', roleLabel: 'Admin' },
+      }),
+    ).toBe('dashboard')
+
     expect(appSource).toContain('fetchAuthProfile(user)')
-    expect(appSource).toContain('profileResolved')
-    expect(appSource).toContain('membershipGranted')
-    expect(appSource).toContain('hasOrganizationMembership')
-    expect(appSource).toContain('Checking organization access')
-    expect(appSource).toContain('<DemoOnboarding')
-    expect(appSource.indexOf('fetchAuthProfile(user)')).toBeLessThan(
-      appSource.indexOf('<DashboardLayout'),
-    )
-    expect(appSource.indexOf('!profileResolved')).toBeLessThan(
-      appSource.indexOf('<DashboardLayout'),
-    )
-    expect(appSource.indexOf('membershipGranted')).toBeLessThan(
-      appSource.indexOf('<DashboardLayout'),
-    )
+    expect(appSource).toContain('resolveAppShellView')
+    expect(appSource).toContain('profileUserId')
   })
 
   it('offers demo onboarding to authenticated users without membership', () => {
+    expect(
+      resolveAppShellView({
+        authReady: true,
+        session: authSession(),
+        profileUserId: 'user-1',
+        profile: LOADING_PROFILE,
+      }),
+    ).toBe('demo-onboarding')
+
     expect(demoOnboardingSource).toContain('Explore SovereignShield AI')
     expect(demoOnboardingSource).toContain('DEMO_ROLE_OPTIONS')
     expect(demoOnboardingSource).toContain('onSelectRole')
-    expect(appSource).toContain('demoEligible')
-    expect(appSource).toContain('isDemoEligible')
-    expect(appSource.indexOf('demoEligible')).toBeLessThan(
-      appSource.indexOf('<DemoOnboarding'),
-    )
-    expect(appSource).toContain('demoEligible ? (')
+    expect(appSource).toContain("shellView === 'demo-onboarding'")
     expect(appSource).toContain('<DemoOnboarding')
     expect(noAccessSource).toContain('No organization access')
   })
 
   it('allows valid members through to DashboardLayout with resolved membershipRole', () => {
-    expect(appSource).toMatch(/membershipGranted[\s\S]*<DashboardLayout/)
-    expect(appSource).toContain('membershipRole={resolvedProfile.membershipRole}')
+    expect(
+      resolveAppShellView({
+        authReady: true,
+        session: authSession(),
+        profileUserId: 'user-1',
+        profile: {
+          ...LOADING_PROFILE,
+          membershipRole: 'fleet-manager',
+          roleLabel: 'Fleet Manager',
+        },
+      }),
+    ).toBe('dashboard')
+
+    expect(appSource).toContain('membershipRole={resolvedProfile.membershipRole!}')
     expect(appSource).toContain('isDemoOrganization={resolvedProfile.isDemoOrganization}')
     expect(appSource).toContain('provisionDemoMembership')
     expect(demoProvisioningSource).toContain("supabase.rpc('provision_demo_membership'")
@@ -367,6 +403,15 @@ describe('membership access gate', () => {
   })
 
   it('does not mount org-scoped data loaders before membership is granted', () => {
+    expect(
+      resolveAppShellView({
+        authReady: true,
+        session: authSession(),
+        profileUserId: 'user-1',
+        profile: LOADING_PROFILE,
+      }),
+    ).not.toBe('dashboard')
+
     expect(dashboardSource).toContain('if (membershipRole == null) return')
     expect(fleetServiceSource).toContain("from('drivers')")
     expect(fleetServiceSource).toContain("from('vehicles')")
@@ -374,9 +419,7 @@ describe('membership access gate', () => {
     expect(appSource).not.toContain("from('vehicles')")
     expect(appSource).not.toContain('fetchDrivers')
     expect(appSource).not.toContain('fetchVehicles')
-    expect(appSource.indexOf('<DashboardLayout')).toBeGreaterThan(
-      appSource.indexOf('membershipGranted'),
-    )
+    expect(appSource).toContain('resolveAppShellView')
   })
 })
 
@@ -396,19 +439,23 @@ describe('profile wiring and security guards', () => {
     expect(appSource).not.toMatch(/setRole|UserRole/)
     expect(appSource).toContain('fetchAuthProfile(user)')
     expect(appSource).toContain('session?.user')
-    expect(appSource).toContain('membershipRole={resolvedProfile.membershipRole}')
-    expect(appSource).toContain('userId={activeUser.id}')
-    expect(appSource).toContain('dashboardKey')
+    expect(appSource).toContain('profileUserId')
+    expect(appSource).toContain('membershipRole={resolvedProfile.membershipRole!}')
+    expect(appSource).toContain('resolveAppShellView')
+    expect(
+      resolveAppShellView({
+        authReady: true,
+        session: authSession(),
+        profileUserId: 'user-1',
+        profile: { ...LOADING_PROFILE, membershipRole: 'driver', roleLabel: 'Driver' },
+      }),
+    ).toBe('dashboard')
     expect(dashboardSource).toContain('DemoRoleSwitch')
     expect(dashboardSource).toContain('onSwitchDemoRole')
     expect(demoRoleSwitchSource).toContain('Switch Demo Role')
     expect(demoRoleSwitchSource).toContain('Switch demo perspective')
     expect(appSource).toContain('setProfile(LOADING_PROFILE)')
     expect(appSource).toContain('setProfileUserId(null)')
-    expect(appSource).toContain('if (!activeUser && profileUserId !== null)')
-    expect(appSource.indexOf('if (!activeUser && profileUserId !== null)')).toBeLessThan(
-      appSource.indexOf('<Login />'),
-    )
     expect(dashboardSource).toContain('DemoGuidePanel')
     expect(dashboardSource).toContain('ProductOverviewPanel')
     expect(dashboardSource).toContain('displayName')
