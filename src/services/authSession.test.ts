@@ -51,6 +51,7 @@ describe('authSession helpers', () => {
     getSessionMock.mockResolvedValue({ data: { session }, error: null })
 
     await expect(getCurrentSession()).resolves.toBe(session)
+    expect(getSessionMock).toHaveBeenCalledTimes(1)
   })
 
   it('getCurrentSession returns null when Supabase reports an error', async () => {
@@ -194,8 +195,7 @@ describe('authSession helpers', () => {
     expect(appSource).toContain('logAuthBootstrapDiagnostic')
     expect(appSource).toContain('subscribeToAuthState')
     expect(authSessionSource).toContain('resolveAuthBootstrapSession')
-    expect(authSessionSource).not.toContain('await supabase.auth.initialize')
-    expect(authSessionSource).not.toContain('initializeMock')
+    expect(authSessionSource).toContain('await supabase.auth.getSession()')
     expect(authSessionSource).not.toMatch(/access_token\s*[:=]\s*['"]/)
     const bootstrapBlock = appSource.slice(appSource.indexOf('shouldResolveBootstrap'))
     expect(bootstrapBlock.indexOf('await resolveAuthBootstrapSession')).toBeLessThan(

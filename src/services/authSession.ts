@@ -24,12 +24,8 @@ export function logAuthBootstrapDiagnostic(detail: AuthBootstrapDiagnostic): voi
 }
 
 /**
- * Reads the current Supabase Auth session after client initialization.
+ * Reads the current Supabase Auth session via supabase.auth.getSession() only.
  * Does not invent sessions or JWTs and never parses OAuth tokens manually.
- *
- * Relies on supabase.auth.getSession(), which already waits for the client's
- * automatic startup from createClient. A second explicit auth startup call here
- * would be redundant and can race the bootstrap listener chain.
  */
 export async function getCurrentSession(): Promise<Session | null> {
   const { data, error } = await supabase.auth.getSession()
