@@ -1,0 +1,6 @@
+# Gemini Copilot edge function
+# verify_jwt=true: gateway requires a valid Supabase JWT.
+# The Edge Function additionally requires auth.getUser() (reject anon) and
+# RLS-backed organization_members membership before calling Gemini.
+[functions.gemini-copilot]
+verify_jwt = true
