@@ -13,15 +13,14 @@ import {
 import { provisionDemoMembership } from './services/demoProvisioning'
 import {
   applyAuthListenerEvent,
-  finishAuthBootstrap,
   INITIAL_AUTH_LISTENER_STATE,
   resolveAppShellView,
+  runFirstAuthBootstrap,
 } from './authAppGate'
 import {
   hasAuthenticatedSession,
   isImplicitOAuthCallbackUrl,
   logAuthBootstrapDiagnostic,
-  resolveAuthBootstrapSession,
   signOut,
   subscribeToAuthState,
 } from './services/authSession'
@@ -58,18 +57,17 @@ export default function App() {
 
       if (applied.shouldResolveBootstrap) {
         void (async () => {
-          const resolved = await resolveAuthBootstrapSession(event, nextSession)
+          listenerState = await runFirstAuthBootstrap(event, nextSession, listenerState)
 
           logAuthBootstrapDiagnostic({
             event,
             eventSessionPresent: Boolean(nextSession),
-            resolvedSessionPresent: Boolean(resolved),
+            resolvedSessionPresent: Boolean(listenerState.session),
             oauthHashPresent: isImplicitOAuthCallbackUrl(),
           })
 
           if (cancelled) return
 
-          listenerState = finishAuthBootstrap(listenerState, resolved)
           setSession(listenerState.session)
           setAuthReady(listenerState.authReady)
 

@@ -52,7 +52,6 @@ describe('authSession helpers', () => {
 
     await expect(getCurrentSession()).resolves.toBe(session)
     expect(getSessionMock).toHaveBeenCalledTimes(1)
-    expect(authSessionSource).toContain('const { data, error } = await supabase.auth.getSession()')
     expect(authSessionSource).not.toMatch(/await supabase\.auth\.initialize\s*\(/)
   })
 
@@ -190,26 +189,27 @@ describe('authSession helpers', () => {
     expect(supabaseClientSource).toContain('onAuthStateChange')
   })
 
-  it('restores implicit OAuth callbacks through Supabase session APIs in App', () => {
-    expect(appSource).toContain('resolveAuthBootstrapSession')
+  it('App defers React auth state until runFirstAuthBootstrap resolves', () => {
     expect(appSource).toContain('applyAuthListenerEvent')
-    expect(appSource).toContain('finishAuthBootstrap')
+    expect(appSource).toContain('runFirstAuthBootstrap')
     expect(appSource).toContain('logAuthBootstrapDiagnostic')
     expect(appSource).toContain('subscribeToAuthState')
+    expect(appSource).not.toContain('shouldMarkAuthReady')
+    expect(appSource).not.toContain('mergeAuthSessionState')
+    expect(appSource).not.toContain('resolveAuthBootstrapSession')
+    expect(appSource).not.toContain('finishAuthBootstrap')
     expect(authSessionSource).toContain('resolveAuthBootstrapSession')
-    expect(authSessionSource).toContain('await supabase.auth.getSession()')
     expect(authSessionSource).not.toMatch(/await supabase\.auth\.initialize\s*\(/)
     expect(authSessionSource).not.toMatch(/access_token\s*[:=]\s*['"]/)
+
     const bootstrapBlock = appSource.slice(appSource.indexOf('shouldResolveBootstrap'))
-    expect(bootstrapBlock.indexOf('await resolveAuthBootstrapSession')).toBeLessThan(
-      bootstrapBlock.indexOf('finishAuthBootstrap(listenerState, resolved)'),
-    )
-    expect(bootstrapBlock.indexOf('finishAuthBootstrap(listenerState, resolved)')).toBeLessThan(
-      bootstrapBlock.indexOf('setSession(listenerState.session)'),
-    )
-    expect(bootstrapBlock.indexOf('setSession(listenerState.session)')).toBeLessThan(
-      bootstrapBlock.indexOf('setAuthReady(listenerState.authReady)'),
-    )
+    const bootstrapAwaitIndex = bootstrapBlock.indexOf('await runFirstAuthBootstrap')
+    const setSessionIndex = bootstrapBlock.indexOf('setSession(')
+    const setAuthReadyIndex = bootstrapBlock.indexOf('setAuthReady(')
+
+    expect(bootstrapAwaitIndex).toBeGreaterThan(-1)
+    expect(setSessionIndex).toBeGreaterThan(bootstrapAwaitIndex)
+    expect(setAuthReadyIndex).toBeGreaterThan(setSessionIndex)
   })
 
   it('signInWithGoogle maps provider errors to a safe message', async () => {
