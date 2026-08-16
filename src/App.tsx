@@ -20,6 +20,7 @@ import {
 import {
   hasAuthenticatedSession,
   isImplicitOAuthCallbackUrl,
+  deferAfterAuthStateChange,
   logAuthBootstrapDiagnostic,
   signOut,
   subscribeToAuthState,
@@ -56,7 +57,7 @@ export default function App() {
       listenerState = applied.state
 
       if (applied.shouldResolveBootstrap) {
-        void (async () => {
+        deferAfterAuthStateChange(async () => {
           listenerState = await runFirstAuthBootstrap(event, nextSession, listenerState)
 
           logAuthBootstrapDiagnostic({
@@ -83,7 +84,7 @@ export default function App() {
               source: 'client-auth-session',
             })
           }
-        })()
+        })
         return
       }
 

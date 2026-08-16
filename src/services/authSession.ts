@@ -107,6 +107,17 @@ export function subscribeToAuthState(
 }
 
 /**
+ * Schedules work after the current onAuthStateChange callback returns.
+ * supabase.auth.getSession() deadlocks when invoked from inside the callback —
+ * including via async IIFEs that run synchronously until their first await.
+ */
+export function deferAfterAuthStateChange(task: () => void | Promise<void>): void {
+  setTimeout(() => {
+    void task()
+  }, 0)
+}
+
+/**
  * OAuth return URL for Supabase Google sign-in.
  * Production builds should set VITE_SITE_URL to the stable site origin so OAuth
  * does not follow transient preview deployment hostnames.
