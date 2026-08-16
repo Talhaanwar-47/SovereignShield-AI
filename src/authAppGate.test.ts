@@ -189,6 +189,18 @@ describe('auth bootstrap ordering', () => {
     expect(finished.session?.user.id).toBe('oauth-user')
   })
 
+  it('does not mark authReady during in-flight SIGNED_OUT', () => {
+    const started = applyAuthListenerEvent(
+      INITIAL_AUTH_LISTENER_STATE,
+      'INITIAL_SESSION',
+      session('oauth-user'),
+    )
+    const signedOut = applyAuthListenerEvent(started.state, 'SIGNED_OUT', null)
+
+    expect(signedOut.state.authReady).toBe(false)
+    expect(signedOut.state.session).toBeNull()
+  })
+
   it('applies later SIGNED_IN and SIGNED_OUT events after bootstrap', () => {
     const ready = finishAuthBootstrap(INITIAL_AUTH_LISTENER_STATE, session('first'))
 
@@ -206,6 +218,10 @@ describe('auth bootstrap ordering', () => {
         profile: LOADING_PROFILE,
       }),
     ).toBe('login')
+
+    const refreshed = applyAuthListenerEvent(signedIn.state, 'TOKEN_REFRESHED', session('second'))
+    expect(refreshed.state.session?.user.id).toBe('second')
+    expect(refreshed.state.authReady).toBe(true)
   })
 })
 

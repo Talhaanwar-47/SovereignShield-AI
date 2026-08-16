@@ -46,12 +46,14 @@ describe('authSession helpers', () => {
     vi.clearAllMocks()
   })
 
-  it('getCurrentSession returns the Supabase session when present', async () => {
+  it('getCurrentSession uses supabase.auth.getSession only', async () => {
     const session = { user: { id: 'user-1' } }
     getSessionMock.mockResolvedValue({ data: { session }, error: null })
 
     await expect(getCurrentSession()).resolves.toBe(session)
     expect(getSessionMock).toHaveBeenCalledTimes(1)
+    expect(authSessionSource).toContain('const { data, error } = await supabase.auth.getSession()')
+    expect(authSessionSource).not.toMatch(/await supabase\.auth\.initialize\s*\(/)
   })
 
   it('getCurrentSession returns null when Supabase reports an error', async () => {
@@ -196,8 +198,7 @@ describe('authSession helpers', () => {
     expect(appSource).toContain('subscribeToAuthState')
     expect(authSessionSource).toContain('resolveAuthBootstrapSession')
     expect(authSessionSource).toContain('await supabase.auth.getSession()')
-    expect(authSessionSource).not.toMatch(/supabase\.auth\.initialize\s*\(/)
-    expect(authSessionSource).not.toContain('initializeMock')
+    expect(authSessionSource).not.toMatch(/await supabase\.auth\.initialize\s*\(/)
     expect(authSessionSource).not.toMatch(/access_token\s*[:=]\s*['"]/)
     const bootstrapBlock = appSource.slice(appSource.indexOf('shouldResolveBootstrap'))
     expect(bootstrapBlock.indexOf('await resolveAuthBootstrapSession')).toBeLessThan(

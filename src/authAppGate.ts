@@ -88,6 +88,12 @@ export function applyAuthListenerEvent(
   }
 
   if (!state.authReady) {
+    if (event === 'SIGNED_OUT') {
+      return {
+        state: { ...state, session: null },
+        shouldResolveBootstrap: false,
+      }
+    }
     if (nextSession) {
       return {
         state: { ...state, session: nextSession },

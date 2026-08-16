@@ -89,7 +89,9 @@ export default function App() {
         return
       }
 
-      if (!listenerState.authReady) return
+      if (!listenerState.authReady) {
+        return
+      }
 
       setSession(listenerState.session)
 
