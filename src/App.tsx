@@ -11,10 +11,14 @@ import {
   type MembershipRole,
 } from './services/authProfile'
 import { provisionDemoMembership } from './services/demoProvisioning'
-import { mergeAuthSessionState, resolveAppShellView } from './authAppGate'
+import {
+  applyAuthListenerEvent,
+  finishAuthBootstrap,
+  INITIAL_AUTH_LISTENER_STATE,
+  resolveAppShellView,
+} from './authAppGate'
 import {
   hasAuthenticatedSession,
-  isAuthBootstrapEvent,
   isImplicitOAuthCallbackUrl,
   logAuthBootstrapDiagnostic,
   resolveAuthBootstrapSession,
@@ -44,12 +48,15 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
-    let bootstrapped = false
+    let listenerState = INITIAL_AUTH_LISTENER_STATE
 
     const unsubscribe = subscribeToAuthState((event, nextSession) => {
       if (cancelled) return
 
-      if (!bootstrapped && isAuthBootstrapEvent(event)) {
+      const applied = applyAuthListenerEvent(listenerState, event, nextSession)
+      listenerState = applied.state
+
+      if (applied.shouldResolveBootstrap) {
         void (async () => {
           const resolved = await resolveAuthBootstrapSession(event, nextSession)
 
@@ -60,13 +67,13 @@ export default function App() {
             oauthHashPresent: isImplicitOAuthCallbackUrl(),
           })
 
-          if (cancelled || bootstrapped) return
+          if (cancelled) return
 
-          bootstrapped = true
-          setSession(resolved)
-          setAuthReady(true)
+          listenerState = finishAuthBootstrap(listenerState, resolved)
+          setSession(listenerState.session)
+          setAuthReady(listenerState.authReady)
 
-          const user = resolved?.user
+          const user = listenerState.session?.user
           if (user) {
             recordAuditEvent({
               category: 'Authentication',
@@ -82,9 +89,9 @@ export default function App() {
         return
       }
 
-      if (!bootstrapped) return
+      setSession(listenerState.session)
 
-      setSession((previous) => mergeAuthSessionState(previous, event, nextSession))
+      if (!listenerState.authReady) return
 
       const user = nextSession?.user
       if (event === 'SIGNED_IN' && user) {

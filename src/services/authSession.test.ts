@@ -189,11 +189,24 @@ describe('authSession helpers', () => {
 
   it('restores implicit OAuth callbacks through Supabase session APIs in App', () => {
     expect(appSource).toContain('resolveAuthBootstrapSession')
-    expect(appSource).toContain('isAuthBootstrapEvent')
+    expect(appSource).toContain('applyAuthListenerEvent')
+    expect(appSource).toContain('finishAuthBootstrap')
     expect(appSource).toContain('logAuthBootstrapDiagnostic')
     expect(appSource).toContain('subscribeToAuthState')
     expect(authSessionSource).toContain('resolveAuthBootstrapSession')
+    expect(authSessionSource).not.toContain('await supabase.auth.initialize')
+    expect(authSessionSource).not.toContain('initializeMock')
     expect(authSessionSource).not.toMatch(/access_token\s*[:=]\s*['"]/)
+    const bootstrapBlock = appSource.slice(appSource.indexOf('shouldResolveBootstrap'))
+    expect(bootstrapBlock.indexOf('await resolveAuthBootstrapSession')).toBeLessThan(
+      bootstrapBlock.indexOf('finishAuthBootstrap(listenerState, resolved)'),
+    )
+    expect(bootstrapBlock.indexOf('finishAuthBootstrap(listenerState, resolved)')).toBeLessThan(
+      bootstrapBlock.indexOf('setSession(listenerState.session)'),
+    )
+    expect(bootstrapBlock.indexOf('setSession(listenerState.session)')).toBeLessThan(
+      bootstrapBlock.indexOf('setAuthReady(listenerState.authReady)'),
+    )
   })
 
   it('signInWithGoogle maps provider errors to a safe message', async () => {
