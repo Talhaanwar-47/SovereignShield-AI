@@ -16,12 +16,22 @@ jobs:
     name: Test, lint, and build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Client-safe Vite public vars only. Never log these values.
+    # Required GitHub Secrets: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY.
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Verify Supabase CI env present
+        run: |
+          test -n "$VITE_SUPABASE_URL"
+          test -n "$VITE_SUPABASE_ANON_KEY"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
