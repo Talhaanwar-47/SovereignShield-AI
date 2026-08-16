@@ -6,6 +6,7 @@ import {
   INITIAL_AUTH_LISTENER_STATE,
   mergeAuthSessionState,
   resolveAppShellView,
+  runFirstAuthBootstrap,
 } from './authAppGate'
 import type { AuthProfile } from './services/authProfile'
 
@@ -103,18 +104,16 @@ describe('auth bootstrap ordering', () => {
     ).toBe('loading-auth')
   })
 
-  it('waits for resolveAuthBootstrapSession before marking ready', () => {
+  it('runFirstAuthBootstrap waits for session recovery before marking ready', async () => {
     const started = applyAuthListenerEvent(
       INITIAL_AUTH_LISTENER_STATE,
       'INITIAL_SESSION',
       null,
     )
-
     expect(started.state.authReady).toBe(false)
-    expect(started.shouldResolveBootstrap).toBe(true)
 
     const restored = session('oauth-user')
-    const finished = finishAuthBootstrap(started.state, restored)
+    const finished = await runFirstAuthBootstrap('SIGNED_IN', restored, started.state)
 
     expect(finished.authReady).toBe(true)
     expect(finished.session).toBe(restored)

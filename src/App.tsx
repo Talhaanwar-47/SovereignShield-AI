@@ -89,9 +89,9 @@ export default function App() {
         return
       }
 
-      setSession(listenerState.session)
-
       if (!listenerState.authReady) return
+
+      setSession(listenerState.session)
 
       const user = nextSession?.user
       if (event === 'SIGNED_IN' && user) {

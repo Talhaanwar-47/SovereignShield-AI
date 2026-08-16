@@ -1,6 +1,6 @@
 import type { Session } from '@supabase/supabase-js'
 import type { AuthChangeEvent } from '@supabase/supabase-js'
-import { hasAuthenticatedSession, isAuthBootstrapEvent } from './services/authSession'
+import { hasAuthenticatedSession, isAuthBootstrapEvent, resolveAuthBootstrapSession } from './services/authSession'
 import type { AuthProfile } from './services/authProfile'
 import { hasOrganizationMembership, isDemoEligible } from './services/authProfile'
 
@@ -120,4 +120,17 @@ export function finishAuthBootstrap(
     authReady: true,
     session: resolved ?? state.session,
   }
+}
+
+/**
+ * First bootstrap step: wait for session recovery, then mark auth ready.
+ * Callers must not set React authReady until this promise resolves.
+ */
+export async function runFirstAuthBootstrap(
+  event: AuthChangeEvent,
+  eventSession: Session | null,
+  state: AuthListenerState,
+): Promise<AuthListenerState> {
+  const resolved = await resolveAuthBootstrapSession(event, eventSession)
+  return finishAuthBootstrap(state, resolved)
 }

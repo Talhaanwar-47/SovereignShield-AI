@@ -196,6 +196,8 @@ describe('authSession helpers', () => {
     expect(appSource).toContain('subscribeToAuthState')
     expect(authSessionSource).toContain('resolveAuthBootstrapSession')
     expect(authSessionSource).toContain('await supabase.auth.getSession()')
+    expect(authSessionSource).not.toMatch(/supabase\.auth\.initialize\s*\(/)
+    expect(authSessionSource).not.toContain('initializeMock')
     expect(authSessionSource).not.toMatch(/access_token\s*[:=]\s*['"]/)
     const bootstrapBlock = appSource.slice(appSource.indexOf('shouldResolveBootstrap'))
     expect(bootstrapBlock.indexOf('await resolveAuthBootstrapSession')).toBeLessThan(
