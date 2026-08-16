@@ -6,9 +6,10 @@ const OLD_PREVIEW_DEPLOYMENT_URL =
   'sovereign-shield-ai-a6l5kv9ss-talha-portfolio2.vercel.app'
 const PRODUCTION_SITE_URL = 'https://sovereign-shield-ai.vercel.app'
 
-const { getSessionMock, onAuthStateChangeMock, signInWithOAuthMock, signOutMock } =
+const { getSessionMock, initializeMock, onAuthStateChangeMock, signInWithOAuthMock, signOutMock } =
   vi.hoisted(() => ({
     getSessionMock: vi.fn(),
+    initializeMock: vi.fn(),
     onAuthStateChangeMock: vi.fn(),
     signInWithOAuthMock: vi.fn(),
     signOutMock: vi.fn(),
@@ -17,6 +18,7 @@ const { getSessionMock, onAuthStateChangeMock, signInWithOAuthMock, signOutMock 
 vi.mock('../supabaseClient', () => ({
   supabase: {
     auth: {
+      initialize: initializeMock,
       getSession: getSessionMock,
       onAuthStateChange: onAuthStateChangeMock,
       signInWithOAuth: signInWithOAuthMock,
@@ -38,6 +40,16 @@ import {
 describe('authSession helpers', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    initializeMock.mockResolvedValue({ error: null })
+  })
+
+  it('getCurrentSession waits for auth initialization before reading the session', async () => {
+    const session = { user: { id: 'user-1' } }
+    getSessionMock.mockResolvedValue({ data: { session }, error: null })
+
+    await expect(getCurrentSession()).resolves.toBe(session)
+    expect(initializeMock).toHaveBeenCalledTimes(1)
+    expect(getSessionMock).toHaveBeenCalledTimes(1)
   })
 
   it('getCurrentSession returns the Supabase session when present', async () => {
@@ -97,10 +109,10 @@ describe('authSession helpers', () => {
     vi.unstubAllGlobals()
   })
 
-  it('resolveOAuthRedirectUrl uses VITE_SITE_URL for stable production OAuth redirect', () => {
+  it('resolveOAuthRedirectUrl uses VITE_SITE_URL when the browser is already on that origin', () => {
     vi.stubEnv('VITE_SITE_URL', PRODUCTION_SITE_URL)
     vi.stubGlobal('window', {
-      location: { origin: `https://${OLD_PREVIEW_DEPLOYMENT_URL}` },
+      location: { origin: PRODUCTION_SITE_URL },
     })
 
     expect(resolveOAuthRedirectUrl()).toBe(`${PRODUCTION_SITE_URL}/`)
@@ -109,7 +121,41 @@ describe('authSession helpers', () => {
     vi.unstubAllGlobals()
   })
 
-  it('signInWithGoogle prefers configured production site URL over preview browser origin', async () => {
+  it('resolveOAuthRedirectUrl keeps PKCE on the initiating origin when preview differs from VITE_SITE_URL', () => {
+    vi.stubEnv('VITE_SITE_URL', PRODUCTION_SITE_URL)
+    vi.stubGlobal('window', {
+      location: { origin: `https://${OLD_PREVIEW_DEPLOYMENT_URL}` },
+    })
+
+    expect(resolveOAuthRedirectUrl()).toBe(`https://${OLD_PREVIEW_DEPLOYMENT_URL}/`)
+
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  it('signInWithGoogle prefers configured production site URL over preview browser origin when origins match', async () => {
+    signInWithOAuthMock.mockResolvedValue({ data: {}, error: null })
+    vi.stubEnv('VITE_SITE_URL', PRODUCTION_SITE_URL)
+    vi.stubGlobal('window', {
+      location: { origin: PRODUCTION_SITE_URL },
+    })
+
+    await expect(signInWithGoogle()).resolves.toEqual({})
+
+    expect(signInWithOAuthMock).toHaveBeenCalledWith({
+      provider: 'google',
+      options: {
+        redirectTo: `${PRODUCTION_SITE_URL}/`,
+        skipBrowserRedirect: false,
+        queryParams: { prompt: 'select_account' },
+      },
+    })
+
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  it('signInWithGoogle uses the live browser origin for PKCE when preview host differs from VITE_SITE_URL', async () => {
     signInWithOAuthMock.mockResolvedValue({ data: {}, error: null })
     vi.stubEnv('VITE_SITE_URL', PRODUCTION_SITE_URL)
     vi.stubGlobal('window', {
@@ -121,7 +167,7 @@ describe('authSession helpers', () => {
     expect(signInWithOAuthMock).toHaveBeenCalledWith({
       provider: 'google',
       options: {
-        redirectTo: `${PRODUCTION_SITE_URL}/`,
+        redirectTo: `https://${OLD_PREVIEW_DEPLOYMENT_URL}/`,
         skipBrowserRedirect: false,
         queryParams: { prompt: 'select_account' },
       },
