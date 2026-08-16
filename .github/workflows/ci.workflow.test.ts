@@ -11,7 +11,7 @@ describe('GitHub Actions CI workflow', () => {
     expect(workflow).toContain('on:')
     expect(workflow).toMatch(/push:[\s\S]*branches:\s*\[main\]/)
     expect(workflow).toMatch(/pull_request:[\s\S]*branches:\s*\[main\]/)
-    expect(workflow).toContain("node-version: '20'")
+    expect(workflow).toContain("node-version: '22'")
     expect(workflow).toContain('cache: npm')
     expect(workflow).toContain('npm ci')
     expect(workflow).toContain('npm test')

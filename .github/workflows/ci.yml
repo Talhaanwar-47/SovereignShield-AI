@@ -37,8 +37,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           # Vite 8 requires ^20.19.0 || >=22.12.0 (package-lock.json).
-          # README documents Node.js 20+; no package.json engines field.
-          node-version: '20'
+          # CI uses Node 22 for native WebSocket support required by the toolchain.
+          node-version: '22'
           cache: npm
 
       - name: Install dependencies
