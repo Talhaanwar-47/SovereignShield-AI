@@ -35,12 +35,27 @@ export function subscribeToAuthState(
 }
 
 /**
+ * OAuth return URL for Supabase Google sign-in.
+ * Production builds should set VITE_SITE_URL to the stable site origin so OAuth
+ * does not follow transient preview deployment hostnames.
+ */
+export function resolveOAuthRedirectUrl(): string | undefined {
+  if (typeof window === 'undefined') return undefined
+
+  const configuredSiteUrl = import.meta.env.VITE_SITE_URL?.trim()
+  if (configuredSiteUrl) {
+    return `${configuredSiteUrl.replace(/\/+$/, '')}/`
+  }
+
+  return `${window.location.origin}/`
+}
+
+/**
  * Starts real Google OAuth via Supabase Auth.
  * Caller must have Google provider enabled in the Supabase project.
  */
 export async function signInWithGoogle(): Promise<{ errorMessage?: string }> {
-  const redirectTo =
-    typeof window !== 'undefined' ? `${window.location.origin}/` : undefined
+  const redirectTo = resolveOAuthRedirectUrl()
 
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
