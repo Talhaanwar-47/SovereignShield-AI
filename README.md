@@ -2,9 +2,11 @@
 
 **AI-Powered Fleet Intelligence & Operations Platform**
 
+## Overview
+
 SovereignShield AI is an AI-powered fleet intelligence and operations platform combining secure organization-level access control, deterministic compliance and operational intelligence, alert management, executive analytics, audit visibility, and a natural-language Gemini Copilot.
 
-This is a **portfolio / demo application**. Several capabilities are intentionally simulated and clearly labeled. It is not a production compliance or government identity platform.
+This is a **portfolio / demo application**. Several capabilities are intentionally simulated and clearly labeled. It is not a production compliance or government identity platform, and it does not claim live GPS, government identity verification, or enterprise production readiness.
 
 ---
 
@@ -13,7 +15,7 @@ This is a **portfolio / demo application**. Several capabilities are intentional
 | Capability | Description |
 |------------|-------------|
 | **Secure RBAC / RLS** | Supabase Auth + `organization_members` + PostgreSQL Row Level Security |
-| **AI Identity Verification** | AI-assisted identity document OCR, structured identity extraction, and verification workflow |
+| **AI-assisted identity workflow** | AI-assisted identity document OCR, structured identity extraction, and registry-comparison verification. Local assessment only — not government identity verification. |
 | **Fleet Intelligence** | Vehicle/driver registry with role-scoped visibility |
 | **Natural-Language AI Copilot** | Gemini via Supabase Edge Function (server-side API key) |
 | **Operations Command Center** | Deterministic priority engine over fleet snapshot |
@@ -22,6 +24,19 @@ This is a **portfolio / demo application**. Several capabilities are intentional
 | **Executive Analytics** | KPIs composed from deterministic engines |
 | **Audit & Security Center** | Session-local audit event visibility |
 | **Recruiter / Demo Experience** | Guided demo UX, role overview, honest capability labels |
+
+---
+
+## Engineering Highlights
+
+- Real Google OAuth with Supabase Auth
+- Role-aware PostgreSQL RLS using `organization_members`
+- Server-side Gemini Copilot through Supabase Edge Functions
+- Gemini API key kept server-side
+- AI-assisted identity document OCR, structured identity extraction, and registry-comparison verification workflow
+- Role-protected driver PII architecture
+- Deterministic Operations, Compliance, Alert, and Executive Analytics engines
+- CORS controls, authentication/authorization checks, rate limiting, input validation, and sanitized AI error handling
 
 ---
 
@@ -47,9 +62,7 @@ Gemini Copilot via Edge Function (server-side GEMINI_API_KEY)
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed flow diagrams.
 
----
-
-## AI Architecture
+### AI Architecture
 
 - **Deterministic engines** calculate authoritative operational and compliance metrics (priorities, alerts, compliance status, executive KPIs).
 - **Gemini** explains and summarizes a **server-trusted, RLS-scoped fleet snapshot** built by the Edge Function at request time. It does not perform authorization.
@@ -61,7 +74,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed flow diagrams.
 
 ---
 
-## Security
+## Security Architecture
 
 | Layer | Mechanism |
 |-------|-----------|
@@ -75,6 +88,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed flow diagrams.
 | Driver scope | Own driver row and assigned vehicles only |
 | Rate limiting | 20 requests / 15 min / verified user (in-memory V1) |
 | CORS | Origin allowlist (`localhost:5173` + `COPILOT_ALLOWED_ORIGINS`) |
+| Input validation | Request/body validation in the Edge Function; OCR file type and size checks in the browser |
+| AI errors | Sanitized user-facing Copilot errors — no stack traces, raw Gemini bodies, or secrets |
 | Audit | Session-local events; no sensitive field serialization |
 
 See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
@@ -83,15 +98,13 @@ The **Login screen role selector** (Admin / Fleet Manager / Driver) is **cosmeti
 
 Public **Demo onboarding** role selection applies only to the isolated Demo Organization through a backend RPC. Real authorization always comes from `organization_members.role` and RLS.
 
----
+### Access models
 
-## Access models
-
-### Production
+#### Production
 
 Google Auth → production organization membership → real Admin / Fleet Manager / Driver role.
 
-### Public Demo
+#### Public Demo
 
 Google Auth → Demo onboarding → Demo Organization → Demo Admin / Demo Fleet Manager / Demo Driver → same application experience → synthetic demo data.
 
@@ -103,9 +116,46 @@ Google Auth → Demo onboarding → Demo Organization → Demo Admin / Demo Flee
 
 ---
 
-## Demo Limitations
+## Tech Stack
 
-The following are **not** production capabilities:
+- React 19, TypeScript, Vite 8, Tailwind CSS 4
+- Supabase (Auth, Postgres, Edge Functions)
+- Google Gemini (`gemini-flash-latest`)
+- Tesseract.js (browser OCR)
+- Recharts (analytics charts)
+- Vitest + ESLint
+
+---
+
+## Demo / Screenshots
+
+Screenshot image files are not stored in this repository. The public demo and in-app guided demo UX are the source of truth for the recruiter walkthrough.
+
+**Hosted demo:** [https://sovereign-shield-ai.vercel.app](https://sovereign-shield-ai.vercel.app) — portfolio deployment, not an enterprise production system.
+
+### Recruiter walkthrough
+
+1. Sign in with **Google OAuth** (real). Smart-ID / Mobile-ID on the login screen are mock-only.
+2. If you have no production membership, **Demo onboarding** provisions an isolated Demo Organization role via backend RPC.
+3. Use the guided demo UX and role overview to inspect capabilities with honest labels (simulated vs real).
+
+### What you will see
+
+| Surface | What it demonstrates |
+|---------|----------------------|
+| Operations Command Center | Deterministic priority engine over an RLS-scoped fleet snapshot |
+| Alert & Incident Center | Alerts derived from operational priorities (no fabricated incidents) |
+| Compliance & Risk Intelligence | License expiry analysis; driver risk scores are not implemented |
+| Executive Analytics | KPIs composed from the deterministic engines |
+| Identity tab | Local Tesseract OCR, structured field extraction, and registry comparison |
+| Copilot terminal | Natural-language Gemini over a server-trusted, RLS-scoped snapshot |
+| Audit & Security Center | Session-local audit visibility (not a persisted historical log) |
+
+---
+
+## Production & Security Notes
+
+This project is a **portfolio / demo application**. The following are **not** production capabilities:
 
 - Vehicle telemetry (speed, battery, clearance) is **simulated** — not live GPS or IoT feeds
 - **Live GPS** is not provided
@@ -114,7 +164,7 @@ The following are **not** production capabilities:
 - **Maintenance records** are simulated/derived only where explicitly labeled
 - **Smart-ID / Mobile-ID** login is mock-only (Google OAuth is real)
 - Demo **fallback data** is used when Supabase is unavailable — labeled "Demo Fallback"
-- **Government identity verification** is not performed (local OCR assessment only)
+- **Government identity verification** is not performed (local OCR assessment and registry comparison only)
 - Demo data is **not** production fleet data
 - The public Demo tenant is isolated; demo membership does not grant production organization access
 - This project does **not** claim SOC 2, ISO, GDPR, or production security certification
@@ -122,7 +172,7 @@ The following are **not** production capabilities:
 
 ---
 
-## Setup
+## Local Development
 
 ### Requirements
 
@@ -137,25 +187,17 @@ The following are **not** production capabilities:
 npm install
 ```
 
-### Environment variables
-
-Copy the example file:
+Copy the example environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `VITE_SUPABASE_URL` | Yes (live data / Copilot) | Supabase project URL |
-| `VITE_SUPABASE_ANON_KEY` | Yes (live data / Copilot) | Supabase anon/public key |
+PowerShell:
 
-**Server-side secrets** (set via Supabase CLI or Dashboard — **never** in Vite `.env`):
-
-| Secret | Purpose |
-|--------|---------|
-| `GEMINI_API_KEY` | Google Gemini API key for Copilot |
-| `COPILOT_ALLOWED_ORIGINS` | Production frontend origin(s), comma-separated |
+```powershell
+Copy-Item .env.example .env
+```
 
 ### Supabase configuration
 
@@ -172,9 +214,7 @@ supabase secrets set COPILOT_ALLOWED_ORIGINS=https://your-production-domain
 supabase functions deploy gemini-copilot
 ```
 
----
-
-## Development
+### Scripts
 
 ```bash
 npm run dev      # Start Vite dev server (http://localhost:5173)
@@ -186,42 +226,24 @@ npm run preview  # Preview production build
 
 ---
 
-## CI
+## Environment Variables
 
-GitHub Actions workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) is a **quality gate**. It does **not** deploy production.
+Frontend (Vite `.env`):
 
-Runs on:
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `VITE_SUPABASE_URL` | Yes (live data / Copilot) | Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | Yes (live data / Copilot) | Supabase anon/public key |
+| `VITE_SITE_URL` | No | Optional stable public site origin for OAuth redirect. When unset, sign-in uses the current browser origin. |
 
-- `push` to `main`
-- `pull_request` to `main`
+**Server-side secrets** (set via Supabase CLI or Dashboard — **never** in Vite `.env`):
 
-Pipeline (Node.js 20, `npm` cache, `permissions: contents: read`):
+| Secret | Purpose |
+|--------|---------|
+| `GEMINI_API_KEY` | Google Gemini API key for Copilot |
+| `COPILOT_ALLOWED_ORIGINS` | Production frontend origin(s), comma-separated |
 
-```bash
-npm ci
-npm test
-npm run lint
-npm run build
-```
-
-Failing tests, lint, or build fail the workflow. Supabase database migrations and Edge Function deployment remain **explicit / manual** operations.
-
----
-
-## Deployment
-
-**Do not commit secrets.** There is no automated production deployment. Deploy the frontend to any static host (Vite build output in `dist/`).
-
-Edge Function deployment (manual):
-
-```bash
-supabase link --project-ref <your-project-ref>
-supabase secrets set GEMINI_API_KEY=<placeholder>
-supabase secrets set COPILOT_ALLOWED_ORIGINS=https://your-production-domain
-supabase functions deploy gemini-copilot
-```
-
-Ensure all RLS migrations are applied before exposing the anon key in the browser.
+`http://localhost:5173` is always allowed in the Edge Function CORS allowlist. Never use `*` as an origin.
 
 ---
 
@@ -276,14 +298,42 @@ docs/
 
 ---
 
-## Tech Stack
+## CI
 
-- React 19, TypeScript, Vite 8, Tailwind CSS 4
-- Supabase (Auth, Postgres, Edge Functions)
-- Google Gemini (`gemini-3.6-flash`, pinned)
-- Tesseract.js (browser OCR)
-- Recharts (analytics charts)
-- Vitest + ESLint
+GitHub Actions workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) is a **quality gate**. It does **not** deploy production.
+
+Runs on:
+
+- `push` to `main`
+- `pull_request` to `main`
+
+Pipeline (Node.js 20, `npm` cache, `permissions: contents: read`):
+
+```bash
+npm ci
+npm test
+npm run lint
+npm run build
+```
+
+Failing tests, lint, or build fail the workflow. Supabase database migrations and Edge Function deployment remain **explicit / manual** operations.
+
+---
+
+## Deployment
+
+**Do not commit secrets.** There is no automated production deployment. Deploy the frontend to any static host (Vite build output in `dist/`).
+
+Edge Function deployment (manual):
+
+```bash
+supabase link --project-ref <your-project-ref>
+supabase secrets set GEMINI_API_KEY=<placeholder>
+supabase secrets set COPILOT_ALLOWED_ORIGINS=https://your-production-domain
+supabase functions deploy gemini-copilot
+```
+
+Ensure all RLS migrations are applied before exposing the anon key in the browser.
 
 ---
 
