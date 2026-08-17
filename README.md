@@ -13,6 +13,7 @@ This is a **portfolio / demo application**. Several capabilities are intentional
 | Capability | Description |
 |------------|-------------|
 | **Secure RBAC / RLS** | Supabase Auth + `organization_members` + PostgreSQL Row Level Security |
+| **AI Identity Verification** | AI-assisted identity document OCR, structured identity extraction, and verification workflow |
 | **Fleet Intelligence** | Vehicle/driver registry with role-scoped visibility |
 | **Natural-Language AI Copilot** | Gemini via Supabase Edge Function (server-side API key) |
 | **Operations Command Center** | Deterministic priority engine over fleet snapshot |
